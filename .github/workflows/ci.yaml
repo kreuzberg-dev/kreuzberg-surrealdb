@@ -23,7 +23,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync
 
       - name: Run pre-commit hooks
         uses: j178/prek-action@v1.1.1
@@ -45,7 +45,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync
 
       - name: Run unit tests
         run: uv run pytest --cov --cov-report=xml --ignore=tests/test_integration.py
@@ -62,7 +62,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync
 
       - name: Run integration tests
         run: uv run pytest tests/test_integration.py -v -m integration
