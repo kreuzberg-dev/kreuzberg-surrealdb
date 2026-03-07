@@ -248,7 +248,7 @@ async def test_pipeline_ingest_bytes(
     pipeline = DocumentPipeline(db=db_config)
     pipeline._client = mock_client
 
-    await pipeline.ingest_bytes(b"data", "text/plain", "test://source")
+    await pipeline.ingest_bytes(data=b"data", mime_type="text/plain", source="test://source")
 
     mock_extract.assert_called_once()
     assert mock_extract.call_args[0][0] == b"data"

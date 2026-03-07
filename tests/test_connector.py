@@ -85,7 +85,7 @@ async def test_ingest_bytes(
     connector = DocumentConnector(db=db_config)
     connector._client = mock_client
 
-    await connector.ingest_bytes(b"hello world", "text/plain", "api://response")
+    await connector.ingest_bytes(data=b"hello world", mime_type="text/plain", source="api://response")
 
     mock_extract.assert_called_once_with(b"hello world", "text/plain", config=None)
     call_args = mock_client.query.call_args

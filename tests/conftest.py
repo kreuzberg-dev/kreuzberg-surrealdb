@@ -39,6 +39,9 @@ def _can_embed() -> bool:
 _can_embed()
 
 
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
 @pytest.fixture
 def db_config() -> DatabaseConfig:
     return DatabaseConfig(db_url="mem://", namespace="test", database="test")

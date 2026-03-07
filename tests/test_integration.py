@@ -17,6 +17,7 @@ import pytest
 
 from kreuzberg_surrealdb.config import DatabaseConfig
 from kreuzberg_surrealdb.ingester import DocumentConnector, DocumentPipeline
+from tests.conftest import FIXTURES_DIR
 
 pytestmark = pytest.mark.integration
 
@@ -116,7 +117,7 @@ async def test_connector_ingest_bytes(mem_db_config: DatabaseConfig) -> None:
     async with DocumentConnector(db=mem_db_config) as connector:
         await connector.setup_schema()
         content = b"Python is a programming language used for web development and data science."
-        await connector.ingest_bytes(content, "text/plain", "test://bytes")
+        await connector.ingest_bytes(data=content, mime_type="text/plain", source="test://bytes")
 
         results = await connector.search("python programming", limit=5)
         assert len(results) > 0
@@ -274,7 +275,7 @@ async def test_pipeline_ingest_bytes(mem_db_config: DatabaseConfig) -> None:
     async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         content = b"Kubernetes orchestrates containerized applications across clusters of machines."
-        await pipeline.ingest_bytes(content, "text/plain", "test://k8s")
+        await pipeline.ingest_bytes(data=content, mime_type="text/plain", source="test://k8s")
 
         docs = await pipeline._client.query("SELECT * FROM documents")
         assert len(docs) == 1
@@ -446,3 +447,245 @@ async def test_pipeline_fast_preset_vector_search(mem_db_config: DatabaseConfig,
 
         results = await pipeline.vector_search("machine learning", limit=5)
         assert len(results) > 0
+
+
+# --- Fixture-based ingestion tests ---
+# These use real document fixtures (txt, html, pdf, docx) instead of synthetic text.
+
+FIXTURE_FILES = {
+    "txt": FIXTURES_DIR / "sample.txt",
+    "html": FIXTURES_DIR / "sample.html",
+    "pdf": FIXTURES_DIR / "sample.pdf",
+    "docx": FIXTURES_DIR / "sample.docx",
+}
+
+_MIME_FALLBACK = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+def _mime_for(path: Path) -> str:
+    """Derive MIME type from file extension."""
+    import mimetypes
+
+    mime, _ = mimetypes.guess_type(path.name)
+    if mime is None:
+        mime = _MIME_FALLBACK.get(path.suffix, "application/octet-stream")
+    return mime
+
+
+# --- DocumentConnector: file path ingestion ---
+
+
+@pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
+async def test_connector_ingest_file_fixture(mem_db_config: DatabaseConfig, fmt: str) -> None:
+    path = FIXTURE_FILES[fmt]
+    async with DocumentConnector(db=mem_db_config) as connector:
+        await connector.setup_schema()
+        await connector.ingest_file(path)
+
+        docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        assert len(docs) == 1
+        assert docs[0]["source"] == str(path)
+        assert len(docs[0]["content"]) > 0
+        assert docs[0]["content_hash"] is not None
+
+
+# --- DocumentConnector: bytes ingestion ---
+
+
+@pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
+async def test_connector_ingest_bytes_fixture(mem_db_config: DatabaseConfig, fmt: str) -> None:
+    path = FIXTURE_FILES[fmt]
+    data = path.read_bytes()
+
+    async with DocumentConnector(db=mem_db_config) as connector:
+        await connector.setup_schema()
+        await connector.ingest_bytes(data=data, mime_type=_mime_for(path), source=f"fixture://{fmt}")
+
+        docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        assert len(docs) == 1
+        assert docs[0]["source"] == f"fixture://{fmt}"
+        assert len(docs[0]["content"]) > 0
+
+
+# --- DocumentConnector: ingest_files with all fixtures ---
+
+
+async def test_connector_ingest_files_all_fixtures(mem_db_config: DatabaseConfig) -> None:
+    paths = list(FIXTURE_FILES.values())
+    async with DocumentConnector(db=mem_db_config) as connector:
+        await connector.setup_schema()
+        await connector.ingest_files(paths)
+
+        docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        assert len(docs) == len(paths)
+
+
+# --- DocumentConnector: ingest_directory with fixtures ---
+
+
+async def test_connector_ingest_directory_fixtures(mem_db_config: DatabaseConfig) -> None:
+    async with DocumentConnector(db=mem_db_config) as connector:
+        await connector.setup_schema()
+        await connector.ingest_directory(FIXTURES_DIR, glob="*.*")
+
+        docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        assert len(docs) == 4
+
+
+# --- DocumentConnector: search over fixture content ---
+
+
+async def test_connector_search_fixture_content(mem_db_config: DatabaseConfig) -> None:
+    async with DocumentConnector(db=mem_db_config) as connector:
+        await connector.setup_schema()
+        await connector.ingest_directory(FIXTURES_DIR, glob="*.*")
+
+        results = await connector.search("sample document testing", limit=10)
+        assert len(results) > 0
+
+
+# --- DocumentPipeline (embed=False): file path ingestion ---
+
+
+@pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
+async def test_pipeline_ingest_file_fixture_embed_false(mem_db_config: DatabaseConfig, fmt: str) -> None:
+    path = FIXTURE_FILES[fmt]
+    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+        await pipeline.setup_schema()
+        await pipeline.ingest_file(path)
+
+        docs = await pipeline._client.query("SELECT * FROM documents")
+        assert len(docs) == 1
+        assert docs[0]["source"] == str(path)
+
+        chunks = await pipeline._client.query("SELECT * FROM chunks ORDER BY chunk_index ASC")
+        assert len(chunks) > 0
+        for i, chunk in enumerate(chunks):
+            assert chunk["chunk_index"] == i
+            assert len(chunk["content"]) > 0
+            assert chunk.get("embedding") is None
+
+
+# --- DocumentPipeline (embed=False): bytes ingestion ---
+
+
+@pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
+async def test_pipeline_ingest_bytes_fixture_embed_false(mem_db_config: DatabaseConfig, fmt: str) -> None:
+    path = FIXTURE_FILES[fmt]
+    data = path.read_bytes()
+
+    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+        await pipeline.setup_schema()
+        await pipeline.ingest_bytes(data=data, mime_type=_mime_for(path), source=f"fixture://{fmt}")
+
+        docs = await pipeline._client.query("SELECT * FROM documents")
+        assert len(docs) == 1
+        assert docs[0]["source"] == f"fixture://{fmt}"
+
+        chunks = await pipeline._client.query("SELECT * FROM chunks")
+        assert len(chunks) > 0
+
+
+# --- DocumentPipeline (embed=False): ingest_files + ingest_directory ---
+
+
+async def test_pipeline_ingest_files_all_fixtures_embed_false(mem_db_config: DatabaseConfig) -> None:
+    paths = list(FIXTURE_FILES.values())
+    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+        await pipeline.setup_schema()
+        await pipeline.ingest_files(paths)
+
+        docs = await pipeline._client.query("SELECT * FROM documents")
+        assert len(docs) == len(paths)
+
+        chunks = await pipeline._client.query("SELECT * FROM chunks")
+        assert len(chunks) >= len(paths)
+
+
+async def test_pipeline_ingest_directory_fixtures_embed_false(mem_db_config: DatabaseConfig) -> None:
+    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+        await pipeline.setup_schema()
+        await pipeline.ingest_directory(FIXTURES_DIR, glob="*.*")
+
+        docs = await pipeline._client.query("SELECT * FROM documents")
+        assert len(docs) == 4
+
+        chunks = await pipeline._client.query("SELECT * FROM chunks")
+        assert len(chunks) >= 4
+
+
+# --- DocumentPipeline (embed=False): search over fixture content ---
+
+
+async def test_pipeline_search_fixture_content_embed_false(mem_db_config: DatabaseConfig) -> None:
+    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+        await pipeline.setup_schema()
+        await pipeline.ingest_directory(FIXTURES_DIR, glob="*.*")
+
+        results = await pipeline.search("sample document", limit=10)
+        assert len(results) > 0
+
+
+# --- DocumentPipeline (embed=True): file path ingestion ---
+
+
+@requires_embedding
+@pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
+async def test_pipeline_ingest_file_fixture_embed_true(mem_db_config: DatabaseConfig, fmt: str) -> None:
+    path = FIXTURE_FILES[fmt]
+    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+        await pipeline.setup_schema()
+        await pipeline.ingest_file(path)
+
+        docs = await pipeline._client.query("SELECT * FROM documents")
+        assert len(docs) == 1
+
+        chunks = await pipeline._client.query("SELECT * FROM chunks")
+        assert len(chunks) > 0
+        for chunk in chunks:
+            assert chunk.get("embedding") is not None
+            assert len(chunk["embedding"]) == 768
+
+
+# --- DocumentPipeline (embed=True): bytes ingestion ---
+
+
+@requires_embedding
+@pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
+async def test_pipeline_ingest_bytes_fixture_embed_true(mem_db_config: DatabaseConfig, fmt: str) -> None:
+    path = FIXTURE_FILES[fmt]
+    data = path.read_bytes()
+
+    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+        await pipeline.setup_schema()
+        await pipeline.ingest_bytes(data=data, mime_type=_mime_for(path), source=f"fixture://{fmt}")
+
+        docs = await pipeline._client.query("SELECT * FROM documents")
+        assert len(docs) == 1
+
+        chunks = await pipeline._client.query("SELECT * FROM chunks")
+        assert len(chunks) > 0
+        for chunk in chunks:
+            assert chunk.get("embedding") is not None
+            assert len(chunk["embedding"]) == 768
+
+
+# --- DocumentPipeline (embed=True): batch ingestion ---
+
+
+@requires_embedding
+async def test_pipeline_ingest_all_fixtures_embed_true(mem_db_config: DatabaseConfig) -> None:
+    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+        await pipeline.setup_schema()
+        await pipeline.ingest_directory(FIXTURES_DIR, glob="*.*")
+
+        docs = await pipeline._client.query("SELECT * FROM documents")
+        assert len(docs) == 4
+
+        chunks = await pipeline._client.query("SELECT * FROM chunks")
+        assert len(chunks) >= 4
+        for chunk in chunks:
+            assert chunk.get("embedding") is not None
+            assert len(chunk["embedding"]) == 768

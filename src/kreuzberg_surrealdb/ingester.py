@@ -2,8 +2,9 @@
 
 import hashlib
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from kreuzberg import (
     ChunkingConfig,
@@ -16,7 +17,6 @@ from kreuzberg import (
     get_embedding_preset,
 )
 from surrealdb import AsyncSurreal, RecordID
-from typing_extensions import Self
 
 from kreuzberg_surrealdb.config import DatabaseConfig, IndexConfig
 from kreuzberg_surrealdb.schema import build_connector_schema, build_pipeline_schema
@@ -34,6 +34,22 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()
 
 
+def _parse_datetime(value: Any) -> datetime | None:
+    """Parse a datetime value from metadata, returning None if invalid."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        else:
+            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+    return None
+
+
 def _map_result_to_doc(result: ExtractionResult, source: str, table: str) -> dict[str, Any]:
     """Map an ExtractionResult to a SurrealDB document record."""
     content_hash = _content_hash(result.content)
@@ -44,7 +60,7 @@ def _map_result_to_doc(result: ExtractionResult, source: str, table: str) -> dic
         "mime_type": result.mime_type,
         "title": result.metadata.get("title"),
         "authors": result.metadata.get("authors"),
-        "created_at": result.metadata.get("created_at"),
+        "created_at": _parse_datetime(result.metadata.get("created_at")),
         "metadata": result.metadata,
         "quality_score": result.quality_score,
         "content_hash": content_hash,
@@ -137,16 +153,16 @@ class _BaseIngester:
             result = await extract_file(str(path), config=self._config)
             await self._ingest_result(result, str(path))
 
-    async def ingest_directory(self, directory: str | Path, glob: str = "**/*") -> None:
+    async def ingest_directory(self, directory: str | Path, *, glob: str = "**/*") -> None:
         """Extract and ingest all matching files in a directory."""
         await self.ingest_files(_collect_files(directory, glob))
 
-    async def ingest_bytes(self, data: bytes, mime_type: str, source: str) -> None:
+    async def ingest_bytes(self, *, data: bytes, mime_type: str, source: str) -> None:
         """Extract and ingest from raw bytes."""
         result = await extract_bytes(data, mime_type, config=self._config)
         await self._ingest_result(result, source)
 
-    async def fulltext_search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+    async def fulltext_search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
         """BM25 fulltext search over the search table."""
         table = self._search_table
         return await self._client.query(  # type: ignore[no-any-return]
@@ -165,9 +181,9 @@ class DocumentConnector(_BaseIngester):
         for stmt in stmts:
             await self._client.query(stmt)
 
-    async def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+    async def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
         """BM25 search over full document content."""
-        return await self.fulltext_search(query, limit)
+        return await self.fulltext_search(query, limit=limit)
 
 
 class DocumentPipeline(_BaseIngester):
@@ -282,13 +298,13 @@ class DocumentPipeline(_BaseIngester):
     async def search(
         self,
         query: str,
-        limit: int = 10,
         *,
+        limit: int = 10,
         quality_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         """Hybrid search: vector + BM25 with RRF fusion. Falls back to BM25 when embed=False."""
         if not self._embed:
-            return await self.fulltext_search(query, limit)
+            return await self.fulltext_search(query, limit=limit)
 
         embedding = await self._embed_query(query)
         ct = self._chunk_table
@@ -313,8 +329,8 @@ class DocumentPipeline(_BaseIngester):
     async def vector_search(
         self,
         query: str,
-        limit: int = 10,
         *,
+        limit: int = 10,
         quality_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         """Pure HNSW semantic search over chunks. Requires embed=True."""
