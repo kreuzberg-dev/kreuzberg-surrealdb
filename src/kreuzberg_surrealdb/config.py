@@ -1,4 +1,5 @@
 """Configuration dataclasses for kreuzberg-surrealdb."""
+
 from dataclasses import dataclass
 
 

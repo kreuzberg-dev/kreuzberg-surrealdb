@@ -1,4 +1,5 @@
 """Tests for DocumentConnector."""
+
 import hashlib
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -30,7 +31,10 @@ async def test_setup_schema_executes_all_statements(db_config: DatabaseConfig, m
 
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_ingest_file(
-    mock_extract: MagicMock, db_config: DatabaseConfig, mock_client: AsyncMock, sample_extraction_result: MagicMock,
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
     mock_client.query = AsyncMock(return_value=[])
@@ -51,7 +55,10 @@ async def test_ingest_file(
 
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_ingest_files(
-    mock_extract: MagicMock, db_config: DatabaseConfig, mock_client: AsyncMock, sample_extraction_result: MagicMock,
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
     mock_client.query = AsyncMock(return_value=[])
@@ -67,7 +74,10 @@ async def test_ingest_files(
 
 @patch("kreuzberg_surrealdb.ingester.extract_bytes")
 async def test_ingest_bytes(
-    mock_extract: MagicMock, db_config: DatabaseConfig, mock_client: AsyncMock, sample_extraction_result: MagicMock,
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
     mock_client.query = AsyncMock(return_value=[])
@@ -85,7 +95,10 @@ async def test_ingest_bytes(
 
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_content_hash_computed(
-    mock_extract: MagicMock, db_config: DatabaseConfig, mock_client: AsyncMock, sample_extraction_result: MagicMock,
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
     mock_client.query = AsyncMock(return_value=[])
@@ -103,7 +116,10 @@ async def test_content_hash_computed(
 
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_metadata_fields_mapped(
-    mock_extract: MagicMock, db_config: DatabaseConfig, mock_client: AsyncMock, sample_extraction_result: MagicMock,
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
     mock_client.query = AsyncMock(return_value=[])

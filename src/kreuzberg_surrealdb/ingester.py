@@ -1,4 +1,5 @@
 """Document ingestion and search interface."""
+
 import hashlib
 from collections.abc import Sequence
 from pathlib import Path
@@ -279,7 +280,11 @@ class DocumentPipeline(_BaseIngester):
         return embeddings[0].tolist()  # type: ignore[no-any-return]
 
     async def search(
-        self, query: str, limit: int = 10, *, quality_threshold: float | None = None,
+        self,
+        query: str,
+        limit: int = 10,
+        *,
+        quality_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         """Hybrid search: vector + BM25 with RRF fusion. Falls back to BM25 when embed=False."""
         if not self._embed:
@@ -306,7 +311,11 @@ class DocumentPipeline(_BaseIngester):
         return await self._client.query(rrf_query, params)  # type: ignore[no-any-return]
 
     async def vector_search(
-        self, query: str, limit: int = 10, *, quality_threshold: float | None = None,
+        self,
+        query: str,
+        limit: int = 10,
+        *,
+        quality_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         """Pure HNSW semantic search over chunks. Requires embed=True."""
         if not self._embed:

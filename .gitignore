@@ -10,4 +10,5 @@ build/
 .ruff_cache/
 .venv/
 .env
+.kreuzberg/
 uv.lock

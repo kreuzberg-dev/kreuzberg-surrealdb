@@ -1,4 +1,5 @@
 """Tests for configuration dataclasses."""
+
 from kreuzberg_surrealdb.config import DatabaseConfig, IndexConfig
 
 

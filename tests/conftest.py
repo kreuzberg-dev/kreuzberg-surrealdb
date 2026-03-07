@@ -1,10 +1,42 @@
 """Shared test fixtures."""
+
+import os
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from kreuzberg_surrealdb.config import DatabaseConfig, IndexConfig
+
+
+def _find_ort_dylib() -> str | None:
+    """Auto-detect libonnxruntime.so from the onnxruntime package."""
+    try:
+        import onnxruntime  # type: ignore[import-untyped]
+
+        capi_dir = Path(onnxruntime.__file__).parent / "capi"
+        for entry in capi_dir.iterdir():
+            if entry.name.startswith("libonnxruntime.so.") and not entry.name.endswith("_providers_shared.so"):
+                return str(entry)
+    except (ImportError, FileNotFoundError):
+        pass
+    return None
+
+
+def _can_embed() -> bool:
+    """Check if kreuzberg can generate embeddings (needs ORT_DYLIB_PATH)."""
+    if "ORT_DYLIB_PATH" not in os.environ:
+        path = _find_ort_dylib()
+        if path:
+            os.environ["ORT_DYLIB_PATH"] = path
+        else:
+            return False
+    return True
+
+
+# Set ORT_DYLIB_PATH early so kreuzberg's Rust extension can find ONNX Runtime
+_can_embed()
 
 
 @pytest.fixture

@@ -1,4 +1,5 @@
 """Tests for schema DDL generation."""
+
 from kreuzberg_surrealdb.config import IndexConfig
 from kreuzberg_surrealdb.schema import (
     build_connector_schema,

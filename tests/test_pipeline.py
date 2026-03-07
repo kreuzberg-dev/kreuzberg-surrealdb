@@ -1,4 +1,5 @@
 """Tests for DocumentPipeline."""
+
 import hashlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -75,7 +76,8 @@ def test_pipeline_user_extraction_config_gets_chunking(db_config: DatabaseConfig
 
 
 async def test_pipeline_setup_schema_creates_tables_and_indexes(
-    db_config: DatabaseConfig, mock_client: AsyncMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
 ) -> None:
     pipeline = DocumentPipeline(db=db_config)
     pipeline._client = mock_client
@@ -92,7 +94,8 @@ async def test_pipeline_setup_schema_creates_tables_and_indexes(
 
 
 async def test_pipeline_setup_schema_no_hnsw_when_embed_false(
-    db_config: DatabaseConfig, mock_client: AsyncMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
 ) -> None:
     pipeline = DocumentPipeline(db=db_config, embed=False)
     pipeline._client = mock_client
@@ -119,10 +122,12 @@ async def test_pipeline_ingest_file_stores_doc_and_chunks(
     sample_extraction_result.chunks = sample_chunks
     mock_extract.return_value = sample_extraction_result
 
-    mock_client.query = AsyncMock(side_effect=[
-        [{"id": "doc_inserted"}],
-        [],
-    ])
+    mock_client.query = AsyncMock(
+        side_effect=[
+            [{"id": "doc_inserted"}],
+            [],
+        ]
+    )
 
     pipeline = DocumentPipeline(db=db_config)
     pipeline._client = mock_client
@@ -176,10 +181,12 @@ async def test_pipeline_embed_false_nulls_embeddings(
     sample_extraction_result.chunks = sample_chunks
     mock_extract.return_value = sample_extraction_result
 
-    mock_client.query = AsyncMock(side_effect=[
-        [{"id": "doc"}],
-        [],
-    ])
+    mock_client.query = AsyncMock(
+        side_effect=[
+            [{"id": "doc"}],
+            [],
+        ]
+    )
 
     pipeline = DocumentPipeline(db=db_config, embed=False)
     pipeline._client = mock_client
@@ -203,10 +210,12 @@ async def test_pipeline_chunk_metadata_extracted(
     sample_extraction_result.chunks = sample_chunks
     mock_extract.return_value = sample_extraction_result
 
-    mock_client.query = AsyncMock(side_effect=[
-        [{"id": "doc"}],
-        [],
-    ])
+    mock_client.query = AsyncMock(
+        side_effect=[
+            [{"id": "doc"}],
+            [],
+        ]
+    )
 
     pipeline = DocumentPipeline(db=db_config)
     pipeline._client = mock_client
@@ -226,7 +235,10 @@ async def test_pipeline_chunk_metadata_extracted(
 
 @patch("kreuzberg_surrealdb.ingester.extract_bytes")
 async def test_pipeline_ingest_bytes(
-    mock_extract: MagicMock, db_config: DatabaseConfig, mock_client: AsyncMock, sample_extraction_result: MagicMock,
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
 ) -> None:
     sample_extraction_result.chunks = []
     mock_extract.return_value = sample_extraction_result
@@ -247,7 +259,8 @@ async def test_pipeline_ingest_bytes(
 
 
 async def test_pipeline_search_embed_false_falls_back_to_bm25(
-    db_config: DatabaseConfig, mock_client: AsyncMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
 ) -> None:
     expected = [{"content": "result", "score": 1.0}]
     mock_client.query = AsyncMock(return_value=expected)
@@ -297,7 +310,8 @@ async def test_pipeline_vector_search(db_config: DatabaseConfig, mock_client: As
 
 
 async def test_pipeline_vector_search_raises_when_embed_false(
-    db_config: DatabaseConfig, mock_client: AsyncMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
 ) -> None:
     pipeline = DocumentPipeline(db=db_config, embed=False)
     pipeline._client = mock_client
