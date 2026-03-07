@@ -1,0 +1,387 @@
+"""Tests for DocumentPipeline."""
+import hashlib
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from surrealdb import RecordID
+
+from kreuzberg_surrealdb.config import DatabaseConfig
+from kreuzberg_surrealdb.ingester import DocumentPipeline
+
+# --- init ---
+
+
+def test_pipeline_defaults(db_config: DatabaseConfig) -> None:
+    pipeline = DocumentPipeline(db=db_config)
+    assert pipeline._embed is True
+    assert pipeline._chunk_table == "chunks"
+    assert pipeline._embedding_preset == "balanced"
+    assert pipeline._embedding_dimensions == 768
+    assert pipeline._fastembed_model_name == "BAAI/bge-base-en-v1.5"
+
+
+def test_pipeline_custom_embedding_preset(db_config: DatabaseConfig) -> None:
+    pipeline = DocumentPipeline(db=db_config, embedding_preset="fast")
+    assert pipeline._embedding_preset == "fast"
+    assert pipeline._embedding_dimensions == 384
+    assert pipeline._fastembed_model_name == "sentence-transformers/all-MiniLM-L6-v2"
+
+
+def test_pipeline_invalid_embedding_preset(db_config: DatabaseConfig) -> None:
+    with pytest.raises(ValueError, match="Unknown embedding preset"):
+        DocumentPipeline(db=db_config, embedding_preset="nonexistent")
+
+
+def test_pipeline_embed_false(db_config: DatabaseConfig) -> None:
+    pipeline = DocumentPipeline(db=db_config, embed=False)
+    assert pipeline._embed is False
+
+
+def test_pipeline_custom_chunk_table(db_config: DatabaseConfig) -> None:
+    pipeline = DocumentPipeline(db=db_config, chunk_table="my_chunks")
+    assert pipeline._chunk_table == "my_chunks"
+
+
+def test_pipeline_extraction_config_has_chunking(db_config: DatabaseConfig) -> None:
+    pipeline = DocumentPipeline(db=db_config)
+    assert pipeline._config is not None
+    assert pipeline._config.chunking is not None
+
+
+def test_pipeline_embed_true_has_embedding(db_config: DatabaseConfig) -> None:
+    pipeline = DocumentPipeline(db=db_config, embed=True)
+    assert pipeline._config is not None
+    assert pipeline._config.chunking.embedding is not None
+
+
+def test_pipeline_embed_false_no_embedding(db_config: DatabaseConfig) -> None:
+    pipeline = DocumentPipeline(db=db_config, embed=False)
+    assert pipeline._config is not None
+    assert pipeline._config.chunking.embedding is None
+
+
+def test_pipeline_user_extraction_config_gets_chunking(db_config: DatabaseConfig) -> None:
+    from kreuzberg import ExtractionConfig
+
+    user_config = ExtractionConfig()
+    pipeline = DocumentPipeline(db=db_config, config=user_config)
+
+    assert pipeline._config is user_config
+    assert pipeline._config.chunking is not None
+    assert pipeline._config.chunking.embedding is not None
+
+
+# --- setup_schema ---
+
+
+async def test_pipeline_setup_schema_creates_tables_and_indexes(
+    db_config: DatabaseConfig, mock_client: AsyncMock,
+) -> None:
+    pipeline = DocumentPipeline(db=db_config)
+    pipeline._client = mock_client
+
+    await pipeline.setup_schema()
+
+    calls = [str(c) for c in mock_client.query.call_args_list]
+    joined = " ".join(calls)
+    assert "DEFINE TABLE IF NOT EXISTS documents" in joined
+    assert "DEFINE TABLE IF NOT EXISTS chunks" in joined
+    assert "idx_chunk_content" in joined
+    assert "idx_chunk_embedding" in joined
+    assert "HNSW DIMENSION 768" in joined
+
+
+async def test_pipeline_setup_schema_no_hnsw_when_embed_false(
+    db_config: DatabaseConfig, mock_client: AsyncMock,
+) -> None:
+    pipeline = DocumentPipeline(db=db_config, embed=False)
+    pipeline._client = mock_client
+
+    await pipeline.setup_schema()
+
+    calls = [str(c) for c in mock_client.query.call_args_list]
+    joined = " ".join(calls)
+    assert "idx_chunk_content" in joined
+    assert "idx_chunk_embedding" not in joined
+
+
+# --- ingestion ---
+
+
+@patch("kreuzberg_surrealdb.ingester.extract_file")
+async def test_pipeline_ingest_file_stores_doc_and_chunks(
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
+    sample_chunks: list[MagicMock],
+) -> None:
+    sample_extraction_result.chunks = sample_chunks
+    mock_extract.return_value = sample_extraction_result
+
+    mock_client.query = AsyncMock(side_effect=[
+        [{"id": "doc_inserted"}],
+        [],
+    ])
+
+    pipeline = DocumentPipeline(db=db_config)
+    pipeline._client = mock_client
+
+    await pipeline.ingest_file("/tmp/test.pdf")
+
+    assert mock_client.query.call_count == 2
+    first_call = mock_client.query.call_args_list[0]
+    assert "INSERT IGNORE INTO documents" in first_call[0][0]
+
+    second_call = mock_client.query.call_args_list[1]
+    assert "INSERT INTO chunks" in second_call[0][0]
+    chunk_records = second_call[0][1]["records"]
+    assert len(chunk_records) == 3
+
+    expected_hash = hashlib.sha256(sample_extraction_result.content.encode()).hexdigest()
+    expected_rid = RecordID("documents", expected_hash)
+    assert chunk_records[0]["document"] == expected_rid
+    assert chunk_records[0]["chunk_index"] == 0
+    assert chunk_records[1]["chunk_index"] == 1
+
+
+@patch("kreuzberg_surrealdb.ingester.extract_file")
+async def test_pipeline_ingest_skips_chunks_on_duplicate(
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
+    sample_chunks: list[MagicMock],
+) -> None:
+    sample_extraction_result.chunks = sample_chunks
+    mock_extract.return_value = sample_extraction_result
+    mock_client.query = AsyncMock(return_value=[])
+
+    pipeline = DocumentPipeline(db=db_config)
+    pipeline._client = mock_client
+
+    await pipeline.ingest_file("/tmp/dup.pdf")
+
+    assert mock_client.query.call_count == 1
+
+
+@patch("kreuzberg_surrealdb.ingester.extract_file")
+async def test_pipeline_embed_false_nulls_embeddings(
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
+    sample_chunks: list[MagicMock],
+) -> None:
+    sample_extraction_result.chunks = sample_chunks
+    mock_extract.return_value = sample_extraction_result
+
+    mock_client.query = AsyncMock(side_effect=[
+        [{"id": "doc"}],
+        [],
+    ])
+
+    pipeline = DocumentPipeline(db=db_config, embed=False)
+    pipeline._client = mock_client
+
+    await pipeline.ingest_file("/tmp/test.pdf")
+
+    chunk_call = mock_client.query.call_args_list[1]
+    chunk_records = chunk_call[0][1]["records"]
+    for rec in chunk_records:
+        assert rec["embedding"] is None
+
+
+@patch("kreuzberg_surrealdb.ingester.extract_file")
+async def test_pipeline_chunk_metadata_extracted(
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
+    sample_chunks: list[MagicMock],
+) -> None:
+    sample_extraction_result.chunks = sample_chunks
+    mock_extract.return_value = sample_extraction_result
+
+    mock_client.query = AsyncMock(side_effect=[
+        [{"id": "doc"}],
+        [],
+    ])
+
+    pipeline = DocumentPipeline(db=db_config)
+    pipeline._client = mock_client
+
+    await pipeline.ingest_file("/tmp/test.pdf")
+
+    chunk_call = mock_client.query.call_args_list[1]
+    chunk_records = chunk_call[0][1]["records"]
+    first_chunk = chunk_records[0]
+    assert first_chunk["page_number"] == 1
+    assert first_chunk["char_start"] == 0
+    assert first_chunk["char_end"] == 100
+    assert first_chunk["first_page"] == 1
+    assert first_chunk["last_page"] == 1
+    assert "token_count" in first_chunk
+
+
+@patch("kreuzberg_surrealdb.ingester.extract_bytes")
+async def test_pipeline_ingest_bytes(
+    mock_extract: MagicMock, db_config: DatabaseConfig, mock_client: AsyncMock, sample_extraction_result: MagicMock,
+) -> None:
+    sample_extraction_result.chunks = []
+    mock_extract.return_value = sample_extraction_result
+
+    mock_client.query = AsyncMock(return_value=[{"id": "doc"}])
+
+    pipeline = DocumentPipeline(db=db_config)
+    pipeline._client = mock_client
+
+    await pipeline.ingest_bytes(b"data", "text/plain", "test://source")
+
+    mock_extract.assert_called_once()
+    assert mock_extract.call_args[0][0] == b"data"
+    assert mock_extract.call_args[0][1] == "text/plain"
+
+
+# --- search ---
+
+
+async def test_pipeline_search_embed_false_falls_back_to_bm25(
+    db_config: DatabaseConfig, mock_client: AsyncMock,
+) -> None:
+    expected = [{"content": "result", "score": 1.0}]
+    mock_client.query = AsyncMock(return_value=expected)
+
+    pipeline = DocumentPipeline(db=db_config, embed=False)
+    pipeline._client = mock_client
+
+    result = await pipeline.search("test query")
+
+    assert result == expected
+    query_str = mock_client.query.call_args[0][0]
+    assert "chunks" in query_str
+    assert "@1@" in query_str
+
+
+async def test_pipeline_search_embed_true_uses_hybrid(db_config: DatabaseConfig, mock_client: AsyncMock) -> None:
+    expected = [{"content": "result"}]
+    mock_client.query = AsyncMock(return_value=expected)
+
+    pipeline = DocumentPipeline(db=db_config, embed=True)
+    pipeline._client = mock_client
+    pipeline._embed_query = AsyncMock(return_value=[0.1] * 768)  # type: ignore[method-assign]
+
+    result = await pipeline.search("test query", limit=5)
+
+    assert result == expected
+    query_str = mock_client.query.call_args[0][0]
+    assert "search::rrf" in query_str
+    params = mock_client.query.call_args[0][1]
+    assert params["embedding"] == [0.1] * 768
+    assert params["query"] == "test query"
+
+
+async def test_pipeline_vector_search(db_config: DatabaseConfig, mock_client: AsyncMock) -> None:
+    expected = [{"content": "result", "distance": 0.1}]
+    mock_client.query = AsyncMock(return_value=expected)
+
+    pipeline = DocumentPipeline(db=db_config, embed=True)
+    pipeline._client = mock_client
+    pipeline._embed_query = AsyncMock(return_value=[0.1] * 768)  # type: ignore[method-assign]
+
+    result = await pipeline.vector_search("test query", limit=5)
+
+    assert result == expected
+    query_str = mock_client.query.call_args[0][0]
+    assert "vector::distance::knn()" in query_str
+
+
+async def test_pipeline_vector_search_raises_when_embed_false(
+    db_config: DatabaseConfig, mock_client: AsyncMock,
+) -> None:
+    pipeline = DocumentPipeline(db=db_config, embed=False)
+    pipeline._client = mock_client
+
+    with pytest.raises(ValueError, match="embed=True"):
+        await pipeline.vector_search("test query")
+
+
+async def test_pipeline_fulltext_search_targets_chunks(db_config: DatabaseConfig, mock_client: AsyncMock) -> None:
+    mock_client.query = AsyncMock(return_value=[])
+
+    pipeline = DocumentPipeline(db=db_config)
+    pipeline._client = mock_client
+
+    await pipeline.fulltext_search("test query")
+
+    query_str = mock_client.query.call_args[0][0]
+    assert "chunks" in query_str
+
+
+async def test_pipeline_search_with_quality_threshold(db_config: DatabaseConfig, mock_client: AsyncMock) -> None:
+    expected = [{"content": "result"}]
+    mock_client.query = AsyncMock(return_value=expected)
+
+    pipeline = DocumentPipeline(db=db_config, embed=True)
+    pipeline._client = mock_client
+    pipeline._embed_query = AsyncMock(return_value=[0.1] * 768)  # type: ignore[method-assign]
+
+    result = await pipeline.search("test query", quality_threshold=0.8)
+
+    assert result == expected
+    query_str = mock_client.query.call_args[0][0]
+    assert "document.quality_score >= $quality_threshold" in query_str
+    params = mock_client.query.call_args[0][1]
+    assert params["quality_threshold"] == 0.8
+
+
+async def test_pipeline_search_without_quality_threshold(db_config: DatabaseConfig, mock_client: AsyncMock) -> None:
+    mock_client.query = AsyncMock(return_value=[])
+
+    pipeline = DocumentPipeline(db=db_config, embed=True)
+    pipeline._client = mock_client
+    pipeline._embed_query = AsyncMock(return_value=[0.1] * 768)  # type: ignore[method-assign]
+
+    await pipeline.search("test query")
+
+    query_str = mock_client.query.call_args[0][0]
+    assert "quality_score" not in query_str
+
+
+async def test_pipeline_vector_search_with_quality_threshold(db_config: DatabaseConfig, mock_client: AsyncMock) -> None:
+    expected = [{"content": "result", "distance": 0.1}]
+    mock_client.query = AsyncMock(return_value=expected)
+
+    pipeline = DocumentPipeline(db=db_config, embed=True)
+    pipeline._client = mock_client
+    pipeline._embed_query = AsyncMock(return_value=[0.1] * 768)  # type: ignore[method-assign]
+
+    result = await pipeline.vector_search("test query", quality_threshold=0.7)
+
+    assert result == expected
+    query_str = mock_client.query.call_args[0][0]
+    assert "document.quality_score >= $quality_threshold" in query_str
+    params = mock_client.query.call_args[0][1]
+    assert params["quality_threshold"] == 0.7
+
+
+# --- embed_query ---
+
+
+@patch("fastembed.TextEmbedding")
+async def test_embed_query_lazy_loads_model(mock_text_embedding_cls: MagicMock, db_config: DatabaseConfig) -> None:
+    mock_embedding = MagicMock()
+    mock_embedding.tolist.return_value = [0.1, 0.2, 0.3]
+    mock_model = MagicMock()
+    mock_model.embed.return_value = iter([mock_embedding])
+    mock_text_embedding_cls.return_value = mock_model
+
+    pipeline = DocumentPipeline(db=db_config, embed=True)
+    assert pipeline._embedding_model is None
+
+    result = await pipeline._embed_query("test query")
+
+    mock_text_embedding_cls.assert_called_once_with(model_name="BAAI/bge-base-en-v1.5")
+    assert pipeline._embedding_model is mock_model
+    mock_model.embed.assert_called_once_with(["test query"])
+    assert result == [0.1, 0.2, 0.3]
