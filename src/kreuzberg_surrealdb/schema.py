@@ -24,7 +24,7 @@ def build_document_schema(table: str, index_config: IndexConfig) -> list[str]:
             f"DEFINE FIELD IF NOT EXISTS authors ON TABLE {table} TYPE option<array<string>>;",
             f"DEFINE FIELD IF NOT EXISTS created_at ON TABLE {table} TYPE option<datetime>;",
             f"DEFINE FIELD IF NOT EXISTS ingested_at ON TABLE {table} TYPE datetime DEFAULT time::now();",
-            f"DEFINE FIELD IF NOT EXISTS metadata ON TABLE {table} FLEXIBLE TYPE object;",
+            f"DEFINE FIELD IF NOT EXISTS metadata ON TABLE {table} TYPE object FLEXIBLE;",
             f"DEFINE FIELD IF NOT EXISTS quality_score ON TABLE {table} TYPE option<float>;",
             f"DEFINE FIELD IF NOT EXISTS content_hash ON TABLE {table} TYPE string;",
             f"DEFINE FIELD IF NOT EXISTS detected_languages ON TABLE {table} TYPE option<array<object>>;",
