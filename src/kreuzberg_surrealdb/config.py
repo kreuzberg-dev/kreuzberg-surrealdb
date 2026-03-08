@@ -15,6 +15,14 @@ class DatabaseConfig:
     table: str = "documents"
     insert_batch_size: int = 100
 
+    def __post_init__(self) -> None:
+        if self.db_url.startswith("mem://"):
+            raise ValueError(
+                "In-memory mode (mem://) is not supported. "
+                "kreuzberg-surrealdb requires a SurrealDB v3 server. "
+                "Start one with: docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root"
+            )
+
 
 @dataclass
 class IndexConfig:

@@ -1,17 +1,24 @@
 """Tests for configuration dataclasses."""
 
+import pytest
+
 from kreuzberg_surrealdb.config import DatabaseConfig, IndexConfig
 
 
 def test_database_config_defaults() -> None:
-    cfg = DatabaseConfig(db_url="mem://")
-    assert cfg.db_url == "mem://"
+    cfg = DatabaseConfig(db_url="ws://localhost:8000")
+    assert cfg.db_url == "ws://localhost:8000"
     assert cfg.namespace == "default"
     assert cfg.database == "default"
     assert cfg.username is None
     assert cfg.password is None
     assert cfg.table == "documents"
     assert cfg.insert_batch_size == 100
+
+
+def test_database_config_rejects_mem_url() -> None:
+    with pytest.raises(ValueError, match="In-memory mode"):
+        DatabaseConfig(db_url="mem://")
 
 
 def test_database_config_custom_values() -> None:

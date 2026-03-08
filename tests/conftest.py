@@ -12,7 +12,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 @pytest.fixture
 def db_config() -> DatabaseConfig:
-    return DatabaseConfig(db_url="mem://", namespace="test", database="test")
+    return DatabaseConfig(db_url="ws://localhost:8000", namespace="test", database="test")
 
 
 @pytest.fixture

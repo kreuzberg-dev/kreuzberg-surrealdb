@@ -1,16 +1,14 @@
-"""Integration tests requiring a live SurrealDB instance.
+"""Integration tests requiring a live SurrealDB v3 server.
 
-Run with: uv run pytest tests/test_integration.py -v -m integration
-Uses mem:// (embedded SurrealDB) for local testing — no external server needed.
+Run with: SURREALDB_URL=ws://localhost:8000 uv run pytest tests/test_integration.py -v -m integration
 
-Note: ONNX Runtime must be installed on the system for embedding tests.
-      kreuzberg auto-discovers the library at runtime.
-      SurrealDB's embedded mode (mem://) does not support search::rrf() or parameterized
-      KNN limits ($limit in <|$limit,metric|>), so hybrid/vector search tests require
-      a real SurrealDB server (set SURREALDB_URL env var).
+Requires:
+- A SurrealDB v3 server (set SURREALDB_URL env var)
+- ONNX Runtime installed on the system for embedding tests
 """
 
 import os
+import uuid
 from pathlib import Path
 
 import pytest
@@ -22,25 +20,18 @@ from tests.conftest import FIXTURES_DIR
 pytestmark = pytest.mark.integration
 
 _surrealdb_url = os.environ.get("SURREALDB_URL")
-requires_server = pytest.mark.skipif(
-    not _surrealdb_url,
-    reason="SURREALDB_URL not set; search::rrf and KNN require a full SurrealDB server",
-)
-
-
-@pytest.fixture
-def mem_db_config() -> DatabaseConfig:
-    return DatabaseConfig(db_url="mem://", namespace="test", database="test")
 
 
 @pytest.fixture
 def server_db_config() -> DatabaseConfig:
-    """Config pointing at a real SurrealDB server (via SURREALDB_URL env var)."""
-    assert _surrealdb_url is not None
+    """Config pointing at a real SurrealDB server with a unique database per test."""
+    if not _surrealdb_url:
+        pytest.skip("SURREALDB_URL not set")
+    db_name = f"test_{uuid.uuid4().hex[:8]}"
     return DatabaseConfig(
         db_url=_surrealdb_url,
         namespace="test",
-        database="test",
+        database=db_name,
         username="root",
         password="root",
     )
@@ -92,8 +83,8 @@ def ml_corpus(tmp_path: Path) -> Path:
 # --- DocumentConnector ---
 
 
-async def test_connector_full_roundtrip(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentConnector(db=mem_db_config) as connector:
+async def test_connector_full_roundtrip(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_file(sample_text_file)
 
@@ -102,11 +93,11 @@ async def test_connector_full_roundtrip(mem_db_config: DatabaseConfig, sample_te
 
 
 async def test_connector_ingest_multiple_files(
-    mem_db_config: DatabaseConfig,
+    server_db_config: DatabaseConfig,
     sample_text_file: Path,
     second_text_file: Path,
 ) -> None:
-    async with DocumentConnector(db=mem_db_config) as connector:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_files([sample_text_file, second_text_file])
 
@@ -114,18 +105,18 @@ async def test_connector_ingest_multiple_files(
         assert len(results) > 0
 
 
-async def test_connector_dedup_same_content(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentConnector(db=mem_db_config) as connector:
+async def test_connector_dedup_same_content(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_file(sample_text_file)
         await connector.ingest_file(sample_text_file)
 
-        all_docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        all_docs = await connector._client.query(f"SELECT * FROM {server_db_config.table}")
         assert len(all_docs) == 1
 
 
-async def test_connector_ingest_bytes(mem_db_config: DatabaseConfig) -> None:
-    async with DocumentConnector(db=mem_db_config) as connector:
+async def test_connector_ingest_bytes(server_db_config: DatabaseConfig) -> None:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         content = b"Python is a programming language used for web development and data science."
         await connector.ingest_bytes(data=content, mime_type="text/plain", source="test://bytes")
@@ -134,24 +125,24 @@ async def test_connector_ingest_bytes(mem_db_config: DatabaseConfig) -> None:
         assert len(results) > 0
 
 
-async def test_connector_ingest_directory(mem_db_config: DatabaseConfig, tmp_path: Path) -> None:
+async def test_connector_ingest_directory(server_db_config: DatabaseConfig, tmp_path: Path) -> None:
     for i in range(3):
         (tmp_path / f"doc_{i}.txt").write_text(f"Document number {i} about testing.")
 
-    async with DocumentConnector(db=mem_db_config) as connector:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_directory(tmp_path, glob="*.txt")
 
-        all_docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        all_docs = await connector._client.query(f"SELECT * FROM {server_db_config.table}")
         assert len(all_docs) == 3
 
 
-async def test_connector_document_metadata_stored(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentConnector(db=mem_db_config) as connector:
+async def test_connector_document_metadata_stored(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_file(sample_text_file)
 
-        docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        docs = await connector._client.query(f"SELECT * FROM {server_db_config.table}")
         assert len(docs) == 1
         doc = docs[0]
         assert doc["source"] == str(sample_text_file)
@@ -161,8 +152,8 @@ async def test_connector_document_metadata_stored(mem_db_config: DatabaseConfig,
         assert doc["ingested_at"] is not None
 
 
-async def test_connector_search_limit_respected(mem_db_config: DatabaseConfig, ml_corpus: Path) -> None:
-    async with DocumentConnector(db=mem_db_config) as connector:
+async def test_connector_search_limit_respected(server_db_config: DatabaseConfig, ml_corpus: Path) -> None:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_directory(ml_corpus, glob="*.txt")
 
@@ -172,8 +163,15 @@ async def test_connector_search_limit_respected(mem_db_config: DatabaseConfig, m
         assert len(results_all) >= len(results_1)
 
 
-async def test_connector_custom_table_name(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:  # noqa: ARG001
-    cfg = DatabaseConfig(db_url="mem://", namespace="test", database="test", table="my_docs")
+async def test_connector_custom_table_name(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    cfg = DatabaseConfig(
+        db_url=server_db_config.db_url,
+        namespace=server_db_config.namespace,
+        database=server_db_config.database,
+        username=server_db_config.username,
+        password=server_db_config.password,
+        table="my_docs",
+    )
     async with DocumentConnector(db=cfg) as connector:
         await connector.setup_schema()
         await connector.ingest_file(sample_text_file)
@@ -188,8 +186,8 @@ async def test_connector_custom_table_name(mem_db_config: DatabaseConfig, sample
 # --- DocumentPipeline (embed=False) ---
 
 
-async def test_pipeline_full_roundtrip_embed_false(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_full_roundtrip_embed_false(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -200,8 +198,8 @@ async def test_pipeline_full_roundtrip_embed_false(mem_db_config: DatabaseConfig
         assert len(chunks) > 0
 
 
-async def test_pipeline_chunks_linked_to_document(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_chunks_linked_to_document(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -211,8 +209,8 @@ async def test_pipeline_chunks_linked_to_document(mem_db_config: DatabaseConfig,
             assert "document" in chunk
 
 
-async def test_pipeline_dedup_skips_chunks(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_dedup_skips_chunks(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
         first_chunk_count = len(await pipeline._client.query("SELECT * FROM chunks"))
@@ -223,8 +221,8 @@ async def test_pipeline_dedup_skips_chunks(mem_db_config: DatabaseConfig, sample
         assert second_chunk_count == first_chunk_count
 
 
-async def test_pipeline_fulltext_search_on_chunks(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_fulltext_search_on_chunks(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -232,8 +230,8 @@ async def test_pipeline_fulltext_search_on_chunks(mem_db_config: DatabaseConfig,
         assert len(results) > 0
 
 
-async def test_pipeline_chunk_metadata_stored(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_chunk_metadata_stored(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -247,8 +245,8 @@ async def test_pipeline_chunk_metadata_stored(mem_db_config: DatabaseConfig, sam
             assert chunk["token_count"] > 0
 
 
-async def test_pipeline_embed_false_no_embeddings(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_embed_false_no_embeddings(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -257,8 +255,8 @@ async def test_pipeline_embed_false_no_embeddings(mem_db_config: DatabaseConfig,
             assert chunk.get("embedding") is None
 
 
-async def test_pipeline_ingest_directory(mem_db_config: DatabaseConfig, ml_corpus: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_ingest_directory(server_db_config: DatabaseConfig, ml_corpus: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_directory(ml_corpus, glob="*.txt")
 
@@ -270,11 +268,11 @@ async def test_pipeline_ingest_directory(mem_db_config: DatabaseConfig, ml_corpu
 
 
 async def test_pipeline_ingest_files(
-    mem_db_config: DatabaseConfig,
+    server_db_config: DatabaseConfig,
     sample_text_file: Path,
     second_text_file: Path,
 ) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_files([sample_text_file, second_text_file])
 
@@ -282,8 +280,8 @@ async def test_pipeline_ingest_files(
         assert len(docs) == 2
 
 
-async def test_pipeline_ingest_bytes(mem_db_config: DatabaseConfig) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_ingest_bytes(server_db_config: DatabaseConfig) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         content = b"Kubernetes orchestrates containerized applications across clusters of machines."
         await pipeline.ingest_bytes(data=content, mime_type="text/plain", source="test://k8s")
@@ -293,8 +291,8 @@ async def test_pipeline_ingest_bytes(mem_db_config: DatabaseConfig) -> None:
         assert docs[0]["source"] == "test://k8s"
 
 
-async def test_pipeline_search_limit_respected(mem_db_config: DatabaseConfig, ml_corpus: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_search_limit_respected(server_db_config: DatabaseConfig, ml_corpus: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_directory(ml_corpus, glob="*.txt")
 
@@ -304,8 +302,15 @@ async def test_pipeline_search_limit_respected(mem_db_config: DatabaseConfig, ml
         assert len(results_all) >= len(results_1)
 
 
-async def test_pipeline_custom_table_names(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:  # noqa: ARG001
-    cfg = DatabaseConfig(db_url="mem://", namespace="test", database="test", table="my_docs")
+async def test_pipeline_custom_table_names(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    cfg = DatabaseConfig(
+        db_url=server_db_config.db_url,
+        namespace=server_db_config.namespace,
+        database=server_db_config.database,
+        username=server_db_config.username,
+        password=server_db_config.password,
+        table="my_docs",
+    )
     async with DocumentPipeline(db=cfg, chunk_table="my_chunks", embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
@@ -320,8 +325,8 @@ async def test_pipeline_custom_table_names(mem_db_config: DatabaseConfig, sample
         assert len(results) > 0
 
 
-async def test_pipeline_vector_search_raises_when_embed_false(mem_db_config: DatabaseConfig) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_vector_search_raises_when_embed_false(server_db_config: DatabaseConfig) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         with pytest.raises(ValueError, match="embed=True"):
             await pipeline.vector_search("test query")
@@ -332,10 +337,10 @@ async def test_pipeline_vector_search_raises_when_embed_false(mem_db_config: Dat
 
 
 async def test_pipeline_embed_true_ingest_and_chunks_have_embeddings(
-    mem_db_config: DatabaseConfig,
+    server_db_config: DatabaseConfig,
     sample_text_file: Path,
 ) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -347,8 +352,8 @@ async def test_pipeline_embed_true_ingest_and_chunks_have_embeddings(
             assert len(chunk["embedding"]) == 768
 
 
-async def test_pipeline_embed_true_dedup(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+async def test_pipeline_embed_true_dedup(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
         first_count = len(await pipeline._client.query("SELECT * FROM chunks"))
@@ -359,8 +364,8 @@ async def test_pipeline_embed_true_dedup(mem_db_config: DatabaseConfig, sample_t
         assert second_count == first_count
 
 
-async def test_pipeline_fast_preset_embeddings(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True, embedding_model="fast") as pipeline:
+async def test_pipeline_fast_preset_embeddings(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=True, embedding_model="fast") as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -372,11 +377,11 @@ async def test_pipeline_fast_preset_embeddings(mem_db_config: DatabaseConfig, sa
 
 
 async def test_pipeline_embed_true_fulltext_search_still_works(
-    mem_db_config: DatabaseConfig,
+    server_db_config: DatabaseConfig,
     sample_text_file: Path,
 ) -> None:
     """Even with embed=True, BM25 fulltext search on chunks should work."""
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -384,8 +389,8 @@ async def test_pipeline_embed_true_fulltext_search_still_works(
         assert len(results) > 0
 
 
-async def test_pipeline_embed_true_multiple_docs_ingested(mem_db_config: DatabaseConfig, ml_corpus: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+async def test_pipeline_embed_true_multiple_docs_ingested(server_db_config: DatabaseConfig, ml_corpus: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_directory(ml_corpus, glob="*.txt")
 
@@ -399,13 +404,9 @@ async def test_pipeline_embed_true_multiple_docs_ingested(mem_db_config: Databas
             assert len(chunk["embedding"]) == 768
 
 
-# --- Hybrid search and vector search (require full SurrealDB server) ---
-# SurrealDB's embedded mem:// mode does not support search::rrf() or parameterized
-# KNN limits ($limit in <|$limit,metric|>). These tests document the expected behavior
-# and will pass when run against a real SurrealDB server.
+# --- Hybrid search and vector search ---
 
 
-@requires_server
 async def test_pipeline_hybrid_search(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
     async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
@@ -415,7 +416,6 @@ async def test_pipeline_hybrid_search(server_db_config: DatabaseConfig, sample_t
         assert len(results) > 0
 
 
-@requires_server
 async def test_pipeline_vector_search(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
     async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
@@ -425,7 +425,6 @@ async def test_pipeline_vector_search(server_db_config: DatabaseConfig, sample_t
         assert len(results) > 0
 
 
-@requires_server
 async def test_pipeline_hybrid_search_multiple_docs(server_db_config: DatabaseConfig, ml_corpus: Path) -> None:
     async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
@@ -435,7 +434,6 @@ async def test_pipeline_hybrid_search_multiple_docs(server_db_config: DatabaseCo
         assert len(results) > 0
 
 
-@requires_server
 async def test_pipeline_vector_search_multiple_docs(server_db_config: DatabaseConfig, ml_corpus: Path) -> None:
     async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
@@ -445,7 +443,6 @@ async def test_pipeline_vector_search_multiple_docs(server_db_config: DatabaseCo
         assert len(results) > 0
 
 
-@requires_server
 async def test_pipeline_fast_preset_vector_search(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
     async with DocumentPipeline(db=server_db_config, embed=True, embedding_model="fast") as pipeline:
         await pipeline.setup_schema()
@@ -484,13 +481,13 @@ def _mime_for(path: Path) -> str:
 
 
 @pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
-async def test_connector_ingest_file_fixture(mem_db_config: DatabaseConfig, fmt: str) -> None:
+async def test_connector_ingest_file_fixture(server_db_config: DatabaseConfig, fmt: str) -> None:
     path = FIXTURE_FILES[fmt]
-    async with DocumentConnector(db=mem_db_config) as connector:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_file(path)
 
-        docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        docs = await connector._client.query(f"SELECT * FROM {server_db_config.table}")
         assert len(docs) == 1
         assert docs[0]["source"] == str(path)
         assert len(docs[0]["content"]) > 0
@@ -501,15 +498,15 @@ async def test_connector_ingest_file_fixture(mem_db_config: DatabaseConfig, fmt:
 
 
 @pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
-async def test_connector_ingest_bytes_fixture(mem_db_config: DatabaseConfig, fmt: str) -> None:
+async def test_connector_ingest_bytes_fixture(server_db_config: DatabaseConfig, fmt: str) -> None:
     path = FIXTURE_FILES[fmt]
     data = path.read_bytes()
 
-    async with DocumentConnector(db=mem_db_config) as connector:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_bytes(data=data, mime_type=_mime_for(path), source=f"fixture://{fmt}")
 
-        docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        docs = await connector._client.query(f"SELECT * FROM {server_db_config.table}")
         assert len(docs) == 1
         assert docs[0]["source"] == f"fixture://{fmt}"
         assert len(docs[0]["content"]) > 0
@@ -518,33 +515,33 @@ async def test_connector_ingest_bytes_fixture(mem_db_config: DatabaseConfig, fmt
 # --- DocumentConnector: ingest_files with all fixtures ---
 
 
-async def test_connector_ingest_files_all_fixtures(mem_db_config: DatabaseConfig) -> None:
+async def test_connector_ingest_files_all_fixtures(server_db_config: DatabaseConfig) -> None:
     paths = list(FIXTURE_FILES.values())
-    async with DocumentConnector(db=mem_db_config) as connector:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_files(paths)
 
-        docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        docs = await connector._client.query(f"SELECT * FROM {server_db_config.table}")
         assert len(docs) == len(paths)
 
 
 # --- DocumentConnector: ingest_directory with fixtures ---
 
 
-async def test_connector_ingest_directory_fixtures(mem_db_config: DatabaseConfig) -> None:
-    async with DocumentConnector(db=mem_db_config) as connector:
+async def test_connector_ingest_directory_fixtures(server_db_config: DatabaseConfig) -> None:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_directory(FIXTURES_DIR, glob="*.*")
 
-        docs = await connector._client.query(f"SELECT * FROM {mem_db_config.table}")
+        docs = await connector._client.query(f"SELECT * FROM {server_db_config.table}")
         assert len(docs) == 4
 
 
 # --- DocumentConnector: search over fixture content ---
 
 
-async def test_connector_search_fixture_content(mem_db_config: DatabaseConfig) -> None:
-    async with DocumentConnector(db=mem_db_config) as connector:
+async def test_connector_search_fixture_content(server_db_config: DatabaseConfig) -> None:
+    async with DocumentConnector(db=server_db_config) as connector:
         await connector.setup_schema()
         await connector.ingest_directory(FIXTURES_DIR, glob="*.*")
 
@@ -556,9 +553,9 @@ async def test_connector_search_fixture_content(mem_db_config: DatabaseConfig) -
 
 
 @pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
-async def test_pipeline_ingest_file_fixture_embed_false(mem_db_config: DatabaseConfig, fmt: str) -> None:
+async def test_pipeline_ingest_file_fixture_embed_false(server_db_config: DatabaseConfig, fmt: str) -> None:
     path = FIXTURE_FILES[fmt]
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(path)
 
@@ -578,11 +575,11 @@ async def test_pipeline_ingest_file_fixture_embed_false(mem_db_config: DatabaseC
 
 
 @pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
-async def test_pipeline_ingest_bytes_fixture_embed_false(mem_db_config: DatabaseConfig, fmt: str) -> None:
+async def test_pipeline_ingest_bytes_fixture_embed_false(server_db_config: DatabaseConfig, fmt: str) -> None:
     path = FIXTURE_FILES[fmt]
     data = path.read_bytes()
 
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_bytes(data=data, mime_type=_mime_for(path), source=f"fixture://{fmt}")
 
@@ -597,9 +594,9 @@ async def test_pipeline_ingest_bytes_fixture_embed_false(mem_db_config: Database
 # --- DocumentPipeline (embed=False): ingest_files + ingest_directory ---
 
 
-async def test_pipeline_ingest_files_all_fixtures_embed_false(mem_db_config: DatabaseConfig) -> None:
+async def test_pipeline_ingest_files_all_fixtures_embed_false(server_db_config: DatabaseConfig) -> None:
     paths = list(FIXTURE_FILES.values())
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_files(paths)
 
@@ -610,8 +607,8 @@ async def test_pipeline_ingest_files_all_fixtures_embed_false(mem_db_config: Dat
         assert len(chunks) >= len(paths)
 
 
-async def test_pipeline_ingest_directory_fixtures_embed_false(mem_db_config: DatabaseConfig) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_ingest_directory_fixtures_embed_false(server_db_config: DatabaseConfig) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_directory(FIXTURES_DIR, glob="*.*")
 
@@ -625,8 +622,8 @@ async def test_pipeline_ingest_directory_fixtures_embed_false(mem_db_config: Dat
 # --- DocumentPipeline (embed=False): search over fixture content ---
 
 
-async def test_pipeline_search_fixture_content_embed_false(mem_db_config: DatabaseConfig) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=False) as pipeline:
+async def test_pipeline_search_fixture_content_embed_false(server_db_config: DatabaseConfig) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=False) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_directory(FIXTURES_DIR, glob="*.*")
 
@@ -638,9 +635,9 @@ async def test_pipeline_search_fixture_content_embed_false(mem_db_config: Databa
 
 
 @pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
-async def test_pipeline_ingest_file_fixture_embed_true(mem_db_config: DatabaseConfig, fmt: str) -> None:
+async def test_pipeline_ingest_file_fixture_embed_true(server_db_config: DatabaseConfig, fmt: str) -> None:
     path = FIXTURE_FILES[fmt]
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(path)
 
@@ -658,11 +655,11 @@ async def test_pipeline_ingest_file_fixture_embed_true(mem_db_config: DatabaseCo
 
 
 @pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
-async def test_pipeline_ingest_bytes_fixture_embed_true(mem_db_config: DatabaseConfig, fmt: str) -> None:
+async def test_pipeline_ingest_bytes_fixture_embed_true(server_db_config: DatabaseConfig, fmt: str) -> None:
     path = FIXTURE_FILES[fmt]
     data = path.read_bytes()
 
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_bytes(data=data, mime_type=_mime_for(path), source=f"fixture://{fmt}")
 
@@ -679,8 +676,8 @@ async def test_pipeline_ingest_bytes_fixture_embed_true(mem_db_config: DatabaseC
 # --- DocumentPipeline (embed=True): batch ingestion ---
 
 
-async def test_pipeline_ingest_all_fixtures_embed_true(mem_db_config: DatabaseConfig) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+async def test_pipeline_ingest_all_fixtures_embed_true(server_db_config: DatabaseConfig) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_directory(FIXTURES_DIR, glob="*.*")
 

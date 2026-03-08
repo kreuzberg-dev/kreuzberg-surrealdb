@@ -134,13 +134,6 @@ async def test_pipeline_ingest_file_stores_doc_and_chunks(
     sample_extraction_result.chunks = sample_chunks
     mock_extract.return_value = sample_extraction_result
 
-    mock_client.query = AsyncMock(
-        side_effect=[
-            [{"id": "doc_inserted"}],
-            [],
-        ]
-    )
-
     pipeline = DocumentPipeline(db=db_config)
     pipeline._client = mock_client
 
@@ -151,7 +144,7 @@ async def test_pipeline_ingest_file_stores_doc_and_chunks(
     assert "INSERT IGNORE INTO documents" in first_call[0][0]
 
     second_call = mock_client.query.call_args_list[1]
-    assert "INSERT INTO chunks" in second_call[0][0]
+    assert "INSERT IGNORE INTO chunks" in second_call[0][0]
     chunk_records = second_call[0][1]["records"]
     assert len(chunk_records) == 3
 
@@ -160,26 +153,34 @@ async def test_pipeline_ingest_file_stores_doc_and_chunks(
     assert chunk_records[0]["document"] == expected_rid
     assert chunk_records[0]["chunk_index"] == 0
     assert chunk_records[1]["chunk_index"] == 1
+    assert chunk_records[0]["id"] == RecordID("chunks", f"{expected_hash}_0")
+    assert chunk_records[1]["id"] == RecordID("chunks", f"{expected_hash}_1")
+    assert chunk_records[2]["id"] == RecordID("chunks", f"{expected_hash}_2")
 
 
 @patch("kreuzberg_surrealdb.ingester.extract_file")
-async def test_pipeline_ingest_skips_chunks_on_duplicate(
+async def test_pipeline_ingest_idempotent_on_duplicate(
     mock_extract: MagicMock,
     db_config: DatabaseConfig,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
     sample_chunks: list[MagicMock],
 ) -> None:
+    """Duplicate ingestion uses INSERT IGNORE for both docs and chunks, making it idempotent."""
     sample_extraction_result.chunks = sample_chunks
     mock_extract.return_value = sample_extraction_result
-    mock_client.query = AsyncMock(return_value=[])
 
     pipeline = DocumentPipeline(db=db_config)
     pipeline._client = mock_client
 
     await pipeline.ingest_file("/tmp/dup.pdf")
 
-    assert mock_client.query.call_count == 1
+    # Both doc and chunk inserts should be attempted (INSERT IGNORE handles dedup)
+    assert mock_client.query.call_count == 2
+    first_call = mock_client.query.call_args_list[0]
+    assert "INSERT IGNORE INTO documents" in first_call[0][0]
+    second_call = mock_client.query.call_args_list[1]
+    assert "INSERT IGNORE INTO chunks" in second_call[0][0]
 
 
 @patch("kreuzberg_surrealdb.ingester.extract_file")
@@ -192,13 +193,6 @@ async def test_pipeline_embed_false_nulls_embeddings(
 ) -> None:
     sample_extraction_result.chunks = sample_chunks
     mock_extract.return_value = sample_extraction_result
-
-    mock_client.query = AsyncMock(
-        side_effect=[
-            [{"id": "doc"}],
-            [],
-        ]
-    )
 
     pipeline = DocumentPipeline(db=db_config, embed=False)
     pipeline._client = mock_client
@@ -221,13 +215,6 @@ async def test_pipeline_chunk_metadata_extracted(
 ) -> None:
     sample_extraction_result.chunks = sample_chunks
     mock_extract.return_value = sample_extraction_result
-
-    mock_client.query = AsyncMock(
-        side_effect=[
-            [{"id": "doc"}],
-            [],
-        ]
-    )
 
     pipeline = DocumentPipeline(db=db_config)
     pipeline._client = mock_client

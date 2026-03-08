@@ -246,22 +246,25 @@ class DocumentPipeline(_BaseIngester):
             await self._client.query(stmt)
 
     async def _ingest_result(self, result: ExtractionResult, source: str) -> None:
-        """Extract, store document, then store chunks with record links."""
+        """Extract, store document, then store chunks with record links.
+
+        Both documents and chunks use deterministic record IDs and INSERT IGNORE,
+        making the entire pipeline idempotent and resilient to partial failures.
+        """
         table = self._db_config.table
         doc = _map_result_to_doc(result, source, table)
         doc_id = doc["id"]
+        content_hash = doc["content_hash"]
 
-        doc_result = await self._client.query(
+        await self._client.query(
             f"INSERT IGNORE INTO {table} $records",
             {"records": [doc]},
         )
 
-        if not doc_result:
-            return  # duplicate, skip chunks
-
         chunk_records: list[dict[str, Any]] = []
         for i, chunk in enumerate(result.chunks):
             chunk_rec: dict[str, Any] = {
+                "id": RecordID(self._chunk_table, f"{content_hash}_{i}"),
                 "document": doc_id,
                 "content": chunk.content,
                 "chunk_index": i,
@@ -281,7 +284,7 @@ class DocumentPipeline(_BaseIngester):
             for i in range(0, len(chunk_records), self._db_config.insert_batch_size):
                 batch = chunk_records[i : i + self._db_config.insert_batch_size]
                 await self._client.query(
-                    f"INSERT INTO {ct} $records",
+                    f"INSERT IGNORE INTO {ct} $records",
                     {"records": batch},
                 )
 
@@ -308,18 +311,18 @@ class DocumentPipeline(_BaseIngester):
         embedding = await self._embed_query(query)
         ct = self._chunk_table
         dist = self._index_config.distance_metric
+        rrf_k = self._index_config.rrf_k
         qt = "document.quality_score >= $quality_threshold AND " if quality_threshold is not None else ""
         rrf_query = (
-            f"LET $vs = (SELECT id FROM {ct} WHERE {qt}embedding <|{limit},{dist}|> $embedding);"
-            f"LET $ft = (SELECT id, search::score(1) AS score FROM {ct} "
-            f"WHERE {qt}content @1@ $query ORDER BY score DESC LIMIT {limit});"
-            f"SELECT * FROM search::rrf([$vs, $ft], $limit, $k);"
+            f"SELECT * FROM search::rrf(["
+            f"(SELECT id FROM {ct} WHERE {qt}embedding <|{limit},{dist}|> $embedding),"
+            f"(SELECT id, search::score(1) AS score FROM {ct} "
+            f"WHERE {qt}content @1@ $query ORDER BY score DESC LIMIT {limit})"
+            f"], {limit}, {rrf_k});"
         )
         params: dict[str, Any] = {
             "embedding": embedding,
             "query": query,
-            "limit": limit,
-            "k": self._index_config.rrf_k,
         }
         if quality_threshold is not None:
             params["quality_threshold"] = quality_threshold
@@ -341,11 +344,11 @@ class DocumentPipeline(_BaseIngester):
         ct = self._chunk_table
         dist = self._index_config.distance_metric
         qt = "document.quality_score >= $quality_threshold AND " if quality_threshold is not None else ""
-        params: dict[str, Any] = {"embedding": embedding, "limit": limit}
+        params: dict[str, Any] = {"embedding": embedding}
         if quality_threshold is not None:
             params["quality_threshold"] = quality_threshold
         return await self._client.query(  # type: ignore[no-any-return]
             f"SELECT *, vector::distance::knn() AS distance FROM {ct} "
-            f"WHERE {qt}embedding <|$limit,{dist}|> $embedding ORDER BY distance",
+            f"WHERE {qt}embedding <|{limit},{dist}|> $embedding ORDER BY distance",
             params,
         )

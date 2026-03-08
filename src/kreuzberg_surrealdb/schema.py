@@ -41,7 +41,7 @@ def build_connector_schema(table: str, index_config: IndexConfig) -> list[str]:
     stmts = build_document_schema(table, index_config)
     stmts.append(
         f"DEFINE INDEX IF NOT EXISTS idx_doc_content ON TABLE {table} "
-        f"FIELDS content SEARCH ANALYZER doc_analyzer BM25({index_config.bm25_k1},{index_config.bm25_b}) HIGHLIGHTS;",
+        f"FIELDS content FULLTEXT ANALYZER doc_analyzer BM25({index_config.bm25_k1},{index_config.bm25_b}) HIGHLIGHTS;",
     )
     return stmts
 
@@ -76,7 +76,7 @@ def build_pipeline_schema(
     stmts.extend(_build_chunk_schema(chunk_table, table))
     stmts.append(
         f"DEFINE INDEX IF NOT EXISTS idx_chunk_content ON TABLE {chunk_table} "
-        f"FIELDS content SEARCH ANALYZER doc_analyzer BM25({index_config.bm25_k1},{index_config.bm25_b}) HIGHLIGHTS;",
+        f"FIELDS content FULLTEXT ANALYZER doc_analyzer BM25({index_config.bm25_k1},{index_config.bm25_b}) HIGHLIGHTS;",
     )
     if embed:
         stmts.append(

@@ -27,6 +27,12 @@ Requires Python 3.11+.
 
 ## Quickstart
 
+### Start a SurrealDB server
+
+```bash
+docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root
+```
+
 ### Document-level search with `DocumentConnector`
 
 Extract full documents and search with BM25. No chunking, no embeddings — fast and simple.
@@ -36,7 +42,11 @@ import asyncio
 from kreuzberg_surrealdb import DatabaseConfig, DocumentConnector
 
 async def main():
-    db = DatabaseConfig(db_url="mem://")
+    db = DatabaseConfig(
+        db_url="ws://localhost:8000",
+        username="root",
+        password="root",
+    )
 
     async with DocumentConnector(db=db) as connector:
         await connector.setup_schema()
@@ -99,7 +109,7 @@ asyncio.run(main())
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `db_url` | `str` | *required* | SurrealDB URL (`"mem://"`, `"ws://localhost:8000"`) |
+| `db_url` | `str` | *required* | SurrealDB URL (`"ws://localhost:8000"`, `"wss://..."`) |
 | `namespace` | `str` | `"default"` | Database namespace |
 | `database` | `str` | `"default"` | Database name |
 | `username` | `str \| None` | `None` | Auth username |
@@ -254,10 +264,11 @@ Each **chunk** record (pipeline only) contains: `document` (record link), `conte
 uv sync
 
 # Run unit tests
-uv run pytest
+uv run pytest --ignore=tests/test_integration.py
 
-# Run integration tests (uses embedded SurrealDB via mem://)
-uv run pytest -m integration
+# Run integration tests (requires a SurrealDB v3 server)
+docker run --rm -d -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root
+SURREALDB_URL=ws://localhost:8000 uv run pytest tests/test_integration.py -v -m integration
 
 # Lint and type check
 uv run ruff check .

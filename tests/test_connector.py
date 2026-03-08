@@ -172,7 +172,7 @@ async def test_connect_and_close(mock_surreal_factory: MagicMock, db_config: Dat
     connector = DocumentConnector(db=db_config)
     await connector.connect()
 
-    mock_surreal_factory.assert_called_once_with(url="mem://")
+    mock_surreal_factory.assert_called_once_with(url="ws://localhost:8000")
     mock_conn.connect.assert_called_once()
     mock_conn.use.assert_called_once_with("test", "test")
 
