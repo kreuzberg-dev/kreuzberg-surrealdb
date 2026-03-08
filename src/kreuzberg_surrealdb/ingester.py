@@ -21,13 +21,6 @@ from surrealdb import AsyncSurreal, RecordID
 from kreuzberg_surrealdb.config import DatabaseConfig, IndexConfig
 from kreuzberg_surrealdb.schema import build_connector_schema, build_pipeline_schema
 
-_PRESET_TO_FASTEMBED: dict[str, str] = {
-    "AllMiniLML6V2Q": "sentence-transformers/all-MiniLM-L6-v2",
-    "BGEBaseENV15": "BAAI/bge-base-en-v1.5",
-    "BGELargeENV15": "BAAI/bge-large-en-v1.5",
-    "MultilingualE5Base": "intfloat/multilingual-e5-base",
-}
-
 
 def _content_hash(content: str) -> str:
     """Compute SHA-256 hash of content for dedup."""
@@ -196,21 +189,27 @@ class DocumentPipeline(_BaseIngester):
         chunk_table: str = "chunks",
         config: ExtractionConfig | None = None,
         embed: bool = True,
-        embedding_preset: str = "balanced",
+        embedding_model: str | EmbeddingModelType = "balanced",
+        embedding_dimensions: int | None = None,
         index_config: IndexConfig | None = None,
     ) -> None:
         super().__init__(db=db, config=config, index_config=index_config)
         self._chunk_table = chunk_table
         self._embed = embed
-        self._embedding_preset = embedding_preset
-        self._embedding_model: Any = None
 
-        preset_info = get_embedding_preset(embedding_preset)
-        if preset_info is None:
-            msg = f"Unknown embedding preset: {embedding_preset}"
-            raise ValueError(msg)
-        self._embedding_dimensions: int = preset_info.dimensions
-        self._fastembed_model_name: str = _PRESET_TO_FASTEMBED[preset_info.model_name]
+        if isinstance(embedding_model, str):
+            preset_info = get_embedding_preset(embedding_model)
+            if preset_info is None:
+                msg = f"Unknown embedding preset: {embedding_model}"
+                raise ValueError(msg)
+            self._embedding_dimensions: int = embedding_dimensions or preset_info.dimensions
+            self._embedding_model_type: EmbeddingModelType = EmbeddingModelType.preset(embedding_model)
+        else:
+            if embedding_dimensions is None:
+                msg = "embedding_dimensions is required when passing an EmbeddingModelType directly"
+                raise ValueError(msg)
+            self._embedding_dimensions = embedding_dimensions
+            self._embedding_model_type = embedding_model
 
         self._config = self._build_extraction_config()
 
@@ -219,7 +218,7 @@ class DocumentPipeline(_BaseIngester):
         if self._embed:
             chunking = ChunkingConfig(
                 embedding=EmbeddingConfig(
-                    model=EmbeddingModelType.preset(self._embedding_preset),
+                    model=self._embedding_model_type,
                 ),
             )
         else:
@@ -287,13 +286,13 @@ class DocumentPipeline(_BaseIngester):
                 )
 
     async def _embed_query(self, query: str) -> list[float]:
-        """Embed a query string using fastembed."""
-        if self._embedding_model is None:
-            from fastembed import TextEmbedding
-
-            self._embedding_model = TextEmbedding(model_name=self._fastembed_model_name)
-        embeddings = list(self._embedding_model.embed([query]))
-        return embeddings[0].tolist()  # type: ignore[no-any-return]
+        """Embed a query string using kreuzberg's extraction pipeline."""
+        result = await extract_bytes(query.encode(), "text/plain", config=self._config)
+        if not result.chunks or result.chunks[0].embedding is None:
+            msg = "Embedding generation failed: no embedding returned for query"
+            raise RuntimeError(msg)
+        embedding: list[float] = result.chunks[0].embedding
+        return embedding
 
     async def search(
         self,

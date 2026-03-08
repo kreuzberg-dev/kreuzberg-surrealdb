@@ -352,7 +352,7 @@ async def test_pipeline_embed_true_dedup(mem_db_config: DatabaseConfig, sample_t
 
 @requires_embedding
 async def test_pipeline_fast_preset_embeddings(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True, embedding_preset="fast") as pipeline:
+    async with DocumentPipeline(db=mem_db_config, embed=True, embedding_model="fast") as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -441,7 +441,7 @@ async def test_pipeline_vector_search_multiple_docs(mem_db_config: DatabaseConfi
 
 @requires_server
 async def test_pipeline_fast_preset_vector_search(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True, embedding_preset="fast") as pipeline:
+    async with DocumentPipeline(db=mem_db_config, embed=True, embedding_model="fast") as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 

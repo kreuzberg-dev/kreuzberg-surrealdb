@@ -16,21 +16,33 @@ def test_pipeline_defaults(db_config: DatabaseConfig) -> None:
     pipeline = DocumentPipeline(db=db_config)
     assert pipeline._embed is True
     assert pipeline._chunk_table == "chunks"
-    assert pipeline._embedding_preset == "balanced"
     assert pipeline._embedding_dimensions == 768
-    assert pipeline._fastembed_model_name == "BAAI/bge-base-en-v1.5"
 
 
 def test_pipeline_custom_embedding_preset(db_config: DatabaseConfig) -> None:
-    pipeline = DocumentPipeline(db=db_config, embedding_preset="fast")
-    assert pipeline._embedding_preset == "fast"
+    pipeline = DocumentPipeline(db=db_config, embedding_model="fast")
     assert pipeline._embedding_dimensions == 384
-    assert pipeline._fastembed_model_name == "sentence-transformers/all-MiniLM-L6-v2"
 
 
 def test_pipeline_invalid_embedding_preset(db_config: DatabaseConfig) -> None:
     with pytest.raises(ValueError, match="Unknown embedding preset"):
-        DocumentPipeline(db=db_config, embedding_preset="nonexistent")
+        DocumentPipeline(db=db_config, embedding_model="nonexistent")
+
+
+def test_pipeline_embedding_model_type_direct(db_config: DatabaseConfig) -> None:
+    from kreuzberg import EmbeddingModelType
+
+    model = EmbeddingModelType.fastembed("BGEBaseENV15", 768)
+    pipeline = DocumentPipeline(db=db_config, embedding_model=model, embedding_dimensions=768)
+    assert pipeline._embedding_dimensions == 768
+
+
+def test_pipeline_embedding_model_type_requires_dimensions(db_config: DatabaseConfig) -> None:
+    from kreuzberg import EmbeddingModelType
+
+    model = EmbeddingModelType.fastembed("BGEBaseENV15", 768)
+    with pytest.raises(ValueError, match="embedding_dimensions is required"):
+        DocumentPipeline(db=db_config, embedding_model=model)
 
 
 def test_pipeline_embed_false(db_config: DatabaseConfig) -> None:
@@ -382,20 +394,43 @@ async def test_pipeline_vector_search_with_quality_threshold(db_config: Database
 # --- embed_query ---
 
 
-@patch("fastembed.TextEmbedding")
-async def test_embed_query_lazy_loads_model(mock_text_embedding_cls: MagicMock, db_config: DatabaseConfig) -> None:
-    mock_embedding = MagicMock()
-    mock_embedding.tolist.return_value = [0.1, 0.2, 0.3]
-    mock_model = MagicMock()
-    mock_model.embed.return_value = iter([mock_embedding])
-    mock_text_embedding_cls.return_value = mock_model
+@patch("kreuzberg_surrealdb.ingester.extract_bytes")
+async def test_embed_query_uses_kreuzberg(mock_extract: MagicMock, db_config: DatabaseConfig) -> None:
+    mock_chunk = MagicMock()
+    mock_chunk.embedding = [0.1, 0.2, 0.3]
+    mock_result = MagicMock()
+    mock_result.chunks = [mock_chunk]
+    mock_extract.return_value = mock_result
 
     pipeline = DocumentPipeline(db=db_config, embed=True)
-    assert pipeline._embedding_model is None
 
     result = await pipeline._embed_query("test query")
 
-    mock_text_embedding_cls.assert_called_once_with(model_name="BAAI/bge-base-en-v1.5")
-    assert pipeline._embedding_model is mock_model
-    mock_model.embed.assert_called_once_with(["test query"])
+    mock_extract.assert_called_once_with(b"test query", "text/plain", config=pipeline._config)
     assert result == [0.1, 0.2, 0.3]
+
+
+@patch("kreuzberg_surrealdb.ingester.extract_bytes")
+async def test_embed_query_raises_on_empty_chunks(mock_extract: MagicMock, db_config: DatabaseConfig) -> None:
+    mock_result = MagicMock()
+    mock_result.chunks = []
+    mock_extract.return_value = mock_result
+
+    pipeline = DocumentPipeline(db=db_config, embed=True)
+
+    with pytest.raises(RuntimeError, match="Embedding generation failed"):
+        await pipeline._embed_query("test query")
+
+
+@patch("kreuzberg_surrealdb.ingester.extract_bytes")
+async def test_embed_query_raises_on_none_embedding(mock_extract: MagicMock, db_config: DatabaseConfig) -> None:
+    mock_chunk = MagicMock()
+    mock_chunk.embedding = None
+    mock_result = MagicMock()
+    mock_result.chunks = [mock_chunk]
+    mock_extract.return_value = mock_result
+
+    pipeline = DocumentPipeline(db=db_config, embed=True)
+
+    with pytest.raises(RuntimeError, match="Embedding generation failed"):
+        await pipeline._embed_query("test query")

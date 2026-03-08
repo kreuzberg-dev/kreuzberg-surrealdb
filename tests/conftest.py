@@ -2,7 +2,6 @@
 
 import os
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,7 +12,7 @@ from kreuzberg_surrealdb.config import DatabaseConfig, IndexConfig
 def _find_ort_dylib() -> str | None:
     """Auto-detect libonnxruntime.so from the onnxruntime package."""
     try:
-        import onnxruntime  # type: ignore[import-untyped]
+        import onnxruntime  # type: ignore[import-not-found]
 
         capi_dir = Path(onnxruntime.__file__).parent / "capi"
         for entry in capi_dir.iterdir():
@@ -95,8 +94,3 @@ def sample_chunks() -> list[MagicMock]:
         }
         chunks.append(chunk)
     return chunks
-
-
-def make_query_result(records: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-    """Wrap records in the format SurrealDB query() returns."""
-    return [records]
