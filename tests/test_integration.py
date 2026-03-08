@@ -27,9 +27,10 @@ def server_db_config() -> DatabaseConfig:
     """Config pointing at a real SurrealDB server with a unique database per test."""
     if not _surrealdb_url:
         pytest.skip("SURREALDB_URL not set")
+    url: str = _surrealdb_url
     db_name = f"test_{uuid.uuid4().hex[:8]}"
     return DatabaseConfig(
-        db_url=_surrealdb_url,
+        db_url=url,
         namespace="test",
         database=db_name,
         username="root",

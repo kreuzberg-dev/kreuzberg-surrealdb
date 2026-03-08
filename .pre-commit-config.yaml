@@ -1,14 +1,44 @@
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+exclude: ^dist/
+
 repos:
+  # Commit message linting
+  - repo: https://github.com/Goldziher/gitfluff
+    rev: v0.8.0
+    hooks:
+      - id: gitfluff-lint
+        args: ["--write"]
+        stages: [commit-msg]
+
+  # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
-      - id: check-yaml
       - id: check-merge-conflict
-      - id: detect-private-key
       - id: check-added-large-files
+      - id: detect-private-key
+      - id: check-json
+      - id: check-yaml
+      - id: check-toml
+      - id: check-case-conflict
 
+  # TOML formatting
+  - repo: https://github.com/tox-dev/pyproject-fmt
+    rev: v2.16.2
+    hooks:
+      - id: pyproject-fmt
+
+  - repo: https://github.com/ComPWA/taplo-pre-commit
+    rev: v0.9.3
+    hooks:
+      - id: taplo-format
+        exclude: "pyproject.toml"
+
+  # Python: ruff (linting + formatting) + mypy (type checking)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.5
     hooks:
@@ -16,11 +46,15 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: local
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
     hooks:
       - id: mypy
-        name: mypy
-        entry: uv run mypy --strict .
-        language: system
-        types: [python]
-        pass_filenames: false
+        exclude: "examples/"
+        additional_dependencies: [pytest]
+
+  # GitHub Actions: linting
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.11
+    hooks:
+      - id: actionlint
