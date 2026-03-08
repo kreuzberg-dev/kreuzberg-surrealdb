@@ -24,7 +24,6 @@ async def test_setup_schema_executes_all_statements(db_config: DatabaseConfig, m
     assert "BM25" in joined
 
 
-
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_ingest_file(
     mock_extract: MagicMock,
@@ -147,6 +146,7 @@ async def test_search_delegates_to_fulltext(db_config: DatabaseConfig, mock_clie
     params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
     assert params["query"] == "test query"
     assert params["limit"] == 5
+
 
 @patch("kreuzberg_surrealdb.ingester.AsyncSurreal")
 async def test_connect_and_close(mock_surreal_factory: MagicMock, db_config: DatabaseConfig) -> None:

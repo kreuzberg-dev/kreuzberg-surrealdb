@@ -7,6 +7,7 @@ from kreuzberg_surrealdb.schema import (
     build_pipeline_schema,
 )
 
+
 def test_document_schema_generates_analyzer(index_config: IndexConfig) -> None:
     stmts = build_document_schema("documents", index_config)
     assert any("DEFINE ANALYZER" in s and "snowball(english)" in s for s in stmts)
