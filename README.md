@@ -10,8 +10,8 @@ Local document extraction, local embeddings, and hybrid search in a single datab
 
 ## Features
 
-- **Multi-format extraction** — PDF, DOCX, HTML, TXT, and more via [Kreuzberg](https://github.com/kreuzberg-dev/kreuzberg)
-- **Local embeddings** — ONNX-based models via [Kreuzberg](https://github.com/kreuzberg-dev/kreuzberg), no API keys needed
+- **Multi-format extraction** — PDF, DOCX, XLSX, HTML, images (with OCR), and [75+ formats](https://github.com/kreuzberg-dev/kreuzberg) via Kreuzberg
+- **Local embeddings** — CPU-based ONNX models via [Kreuzberg](https://github.com/kreuzberg-dev/kreuzberg), no API keys or GPU needed
 - **Three search modes** — BM25 full-text, HNSW vector, and hybrid (RRF fusion)
 - **Content deduplication** — SHA-256 hashing prevents duplicate documents across ingestion runs
 - **Quality filtering** — filter search results by Kreuzberg's extraction quality score
@@ -193,6 +193,48 @@ pipeline = DocumentPipeline(
     embedding_dimensions=512,
 )
 ```
+
+### Chunking Configuration
+
+`DocumentPipeline` automatically chunks documents before indexing. Customize chunk size and overlap via kreuzberg's `ChunkingConfig`:
+
+```python
+from kreuzberg import ExtractionConfig, ChunkingConfig
+
+config = ExtractionConfig(
+    chunking=ChunkingConfig(
+        max_chars=512,      # characters per chunk (default: 1000)
+        max_overlap=100,    # overlap between chunks (default: 200)
+    ),
+)
+
+async with DocumentPipeline(db=db, config=config) as pipeline:
+    await pipeline.setup_schema()
+    await pipeline.ingest_directory("./papers")
+```
+
+The pipeline preserves your chunking parameters and injects the embedding configuration automatically — no need to configure embedding inside `ChunkingConfig` yourself.
+
+`DocumentConnector` does not chunk; it stores full document content.
+
+### Extraction Configuration
+
+The `config` parameter on both classes accepts kreuzberg's `ExtractionConfig`, giving access to the full extraction pipeline — OCR for scanned documents, output format control, quality processing, and more:
+
+```python
+from kreuzberg import ExtractionConfig
+
+config = ExtractionConfig(
+    force_ocr=True,                  # OCR even for searchable PDFs
+    enable_quality_processing=True,  # text quality post-processing
+)
+
+async with DocumentPipeline(db=db, config=config) as pipeline:
+    await pipeline.setup_schema()
+    await pipeline.ingest_file("scanned_report.pdf")
+```
+
+See [kreuzberg's documentation](https://github.com/kreuzberg-dev/kreuzberg) for the full `ExtractionConfig` API.
 
 ## Ingestion Methods
 

@@ -85,6 +85,32 @@ def test_pipeline_user_extraction_config_gets_chunking(db_config: DatabaseConfig
     assert pipeline._config.chunking.embedding is not None
 
 
+def test_pipeline_preserves_user_chunking_params(db_config: DatabaseConfig) -> None:
+    from kreuzberg import ChunkingConfig, ExtractionConfig
+
+    user_config = ExtractionConfig(
+        chunking=ChunkingConfig(max_chars=512, max_overlap=100),
+    )
+    pipeline = DocumentPipeline(db=db_config, config=user_config)
+
+    assert pipeline._config is user_config
+    assert pipeline._config.chunking.max_chars == 512
+    assert pipeline._config.chunking.max_overlap == 100
+    assert pipeline._config.chunking.embedding is not None
+
+
+def test_pipeline_preserves_user_chunking_params_embed_false(db_config: DatabaseConfig) -> None:
+    from kreuzberg import ChunkingConfig, ExtractionConfig
+
+    user_config = ExtractionConfig(
+        chunking=ChunkingConfig(max_chars=256),
+    )
+    pipeline = DocumentPipeline(db=db_config, config=user_config, embed=False)
+
+    assert pipeline._config.chunking.max_chars == 256
+    assert pipeline._config.chunking.embedding is None
+
+
 # --- setup_schema ---
 
 

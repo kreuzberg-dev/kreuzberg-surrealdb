@@ -245,16 +245,25 @@ class DocumentPipeline(_BaseIngester):
         self._config = self._build_extraction_config()
 
     def _build_extraction_config(self) -> ExtractionConfig:
-        """Build ExtractionConfig with chunking and optional embedding."""
-        if self._embed:
-            chunking = ChunkingConfig(
-                embedding=EmbeddingConfig(
-                    model=self._embedding_model_type,
-                ),
-            )
-        else:
-            chunking = ChunkingConfig()
+        """Build ExtractionConfig with chunking and optional embedding.
 
+        If the user provided an ExtractionConfig with a ChunkingConfig,
+        preserve their chunking parameters (max_chars, max_overlap) and
+        only inject the embedding configuration.
+        """
+        embedding = EmbeddingConfig(model=self._embedding_model_type) if self._embed else None
+
+        if self._config is not None and self._config.chunking is not None:
+            user_chunking = self._config.chunking
+            self._config.chunking = ChunkingConfig(
+                max_chars=user_chunking.max_chars,
+                max_overlap=user_chunking.max_overlap,
+                preset=user_chunking.preset,
+                embedding=embedding,
+            )
+            return self._config
+
+        chunking = ChunkingConfig(embedding=embedding)
         if self._config is not None:
             self._config.chunking = chunking
             return self._config
@@ -321,6 +330,11 @@ class DocumentPipeline(_BaseIngester):
                 )
                 _check_insert_result(res, context="chunk insertion")
 
+    @staticmethod
+    def _quality_clause(quality_threshold: float | None) -> str:
+        """Build the WHERE clause fragment for quality filtering."""
+        return "document.quality_score >= $quality_threshold AND " if quality_threshold is not None else ""
+
     async def _embed_query(self, query: str) -> list[float]:
         """Embed a query string using kreuzberg's extraction pipeline."""
         result = await extract_bytes(query.encode(), "text/plain", config=self._config)
@@ -345,12 +359,12 @@ class DocumentPipeline(_BaseIngester):
         ct = self._chunk_table
         dist = self._index_config.distance_metric
         rrf_k = self._index_config.rrf_k
-        qt = "document.quality_score >= $quality_threshold AND " if quality_threshold is not None else ""
+        quality_filter = self._quality_clause(quality_threshold)
         rrf_query = (
             f"SELECT * FROM search::rrf(["
-            f"(SELECT id FROM {ct} WHERE {qt}embedding <|{limit},{dist}|> $embedding),"
+            f"(SELECT id FROM {ct} WHERE {quality_filter}embedding <|{limit},{dist}|> $embedding),"
             f"(SELECT id, search::score(1) AS score FROM {ct} "
-            f"WHERE {qt}content @1@ $query ORDER BY score DESC LIMIT {limit})"
+            f"WHERE {quality_filter}content @1@ $query ORDER BY score DESC LIMIT {limit})"
             f"], {limit}, {rrf_k});"
         )
         params: dict[str, Any] = {
@@ -376,12 +390,12 @@ class DocumentPipeline(_BaseIngester):
         embedding = await self._embed_query(query)
         ct = self._chunk_table
         dist = self._index_config.distance_metric
-        qt = "document.quality_score >= $quality_threshold AND " if quality_threshold is not None else ""
+        quality_filter = self._quality_clause(quality_threshold)
         params: dict[str, Any] = {"embedding": embedding}
         if quality_threshold is not None:
             params["quality_threshold"] = quality_threshold
         return await self._client.query(  # type: ignore[no-any-return]
             f"SELECT *, vector::distance::knn() AS distance FROM {ct} "
-            f"WHERE {qt}embedding <|{limit},{dist}|> $embedding ORDER BY distance",
+            f"WHERE {quality_filter}embedding <|{limit},{dist}|> $embedding ORDER BY distance",
             params,
         )
