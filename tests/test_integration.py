@@ -6,10 +6,11 @@ Uses mem:// (embedded SurrealDB) for local testing — no external server needed
 Note: ONNX Runtime must be installed on the system for embedding tests.
       kreuzberg auto-discovers the library at runtime.
       SurrealDB's embedded mode (mem://) does not support search::rrf() or parameterized
-      KNN limits ($limit in <|$limit,metric|>), so hybrid/vector search tests are skipped
-      in embedded mode.
+      KNN limits ($limit in <|$limit,metric|>), so hybrid/vector search tests require
+      a real SurrealDB server (set SURREALDB_URL env var).
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -20,14 +21,29 @@ from tests.conftest import FIXTURES_DIR
 
 pytestmark = pytest.mark.integration
 
-requires_server = pytest.mark.skip(
-    reason="search::rrf and parameterized KNN require a full SurrealDB server, not mem://"
+_surrealdb_url = os.environ.get("SURREALDB_URL")
+requires_server = pytest.mark.skipif(
+    not _surrealdb_url,
+    reason="SURREALDB_URL not set; search::rrf and KNN require a full SurrealDB server",
 )
 
 
 @pytest.fixture
 def mem_db_config() -> DatabaseConfig:
     return DatabaseConfig(db_url="mem://", namespace="test", database="test")
+
+
+@pytest.fixture
+def server_db_config() -> DatabaseConfig:
+    """Config pointing at a real SurrealDB server (via SURREALDB_URL env var)."""
+    assert _surrealdb_url is not None
+    return DatabaseConfig(
+        db_url=_surrealdb_url,
+        namespace="test",
+        database="test",
+        username="root",
+        password="root",
+    )
 
 
 @pytest.fixture
@@ -390,8 +406,8 @@ async def test_pipeline_embed_true_multiple_docs_ingested(mem_db_config: Databas
 
 
 @requires_server
-async def test_pipeline_hybrid_search(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+async def test_pipeline_hybrid_search(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -400,8 +416,8 @@ async def test_pipeline_hybrid_search(mem_db_config: DatabaseConfig, sample_text
 
 
 @requires_server
-async def test_pipeline_vector_search(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+async def test_pipeline_vector_search(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
@@ -410,8 +426,8 @@ async def test_pipeline_vector_search(mem_db_config: DatabaseConfig, sample_text
 
 
 @requires_server
-async def test_pipeline_hybrid_search_multiple_docs(mem_db_config: DatabaseConfig, ml_corpus: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+async def test_pipeline_hybrid_search_multiple_docs(server_db_config: DatabaseConfig, ml_corpus: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_directory(ml_corpus, glob="*.txt")
 
@@ -420,8 +436,8 @@ async def test_pipeline_hybrid_search_multiple_docs(mem_db_config: DatabaseConfi
 
 
 @requires_server
-async def test_pipeline_vector_search_multiple_docs(mem_db_config: DatabaseConfig, ml_corpus: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
+async def test_pipeline_vector_search_multiple_docs(server_db_config: DatabaseConfig, ml_corpus: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_directory(ml_corpus, glob="*.txt")
 
@@ -430,8 +446,8 @@ async def test_pipeline_vector_search_multiple_docs(mem_db_config: DatabaseConfi
 
 
 @requires_server
-async def test_pipeline_fast_preset_vector_search(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
-    async with DocumentPipeline(db=mem_db_config, embed=True, embedding_model="fast") as pipeline:
+async def test_pipeline_fast_preset_vector_search(server_db_config: DatabaseConfig, sample_text_file: Path) -> None:
+    async with DocumentPipeline(db=server_db_config, embed=True, embedding_model="fast") as pipeline:
         await pipeline.setup_schema()
         await pipeline.ingest_file(sample_text_file)
 
