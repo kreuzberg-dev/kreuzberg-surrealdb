@@ -231,6 +231,28 @@ results = await pipeline.search("budget projections", quality_threshold=0.7)
 results = await pipeline.vector_search("budget projections", quality_threshold=0.7)
 ```
 
+## Known Limitations
+
+### One embedding dimension per SurrealDB server
+
+SurrealDB v3 has a bug where HNSW vector dimension validation is **server-global**: once any HNSW index with dimension N exists anywhere on the server, inserts with a different dimension fail — even across namespaces and databases.
+
+**What this means:** All `DocumentPipeline` instances sharing the same SurrealDB server must use the same embedding model (and dimensions). You cannot mix `"fast"` (384d) and `"balanced"` (768d) on the same server.
+
+```python
+# This works — same model on one server
+pipeline_a = DocumentPipeline(db=db_a, embedding_model="balanced")  # 768d
+pipeline_b = DocumentPipeline(db=db_b, embedding_model="balanced")  # 768d
+
+# This FAILS — different dimensions on one server
+pipeline_a = DocumentPipeline(db=db_a, embedding_model="balanced")  # 768d
+pipeline_b = DocumentPipeline(db=db_b, embedding_model="fast")      # 384d — inserts will fail
+```
+
+**Workaround:** Use separate SurrealDB server instances for different embedding dimensions.
+
+kreuzberg-surrealdb detects this condition and raises a `RuntimeError` with a clear message instead of silently dropping data.
+
 ## Connection Lifecycle
 
 Both classes support async context managers (recommended) or manual lifecycle management:

@@ -7,7 +7,7 @@ import pytest
 from surrealdb import RecordID
 
 from kreuzberg_surrealdb.config import DatabaseConfig
-from kreuzberg_surrealdb.ingester import DocumentPipeline
+from kreuzberg_surrealdb.ingester import DocumentPipeline, _check_insert_result
 
 # --- init ---
 
@@ -378,7 +378,48 @@ async def test_pipeline_vector_search_with_quality_threshold(db_config: Database
     assert params["quality_threshold"] == 0.7
 
 
-# --- embed_query ---
+def test_check_insert_result_passes_on_normal_results() -> None:
+    _check_insert_result([], context="test")
+    _check_insert_result([{"id": "rec:1"}], context="test")
+    _check_insert_result(None, context="test")
+
+
+def test_check_insert_result_raises_on_dimension_error() -> None:
+    result = ["Expected a vector of 768 dimensions, but got 384"]
+    with pytest.raises(RuntimeError, match="Vector dimension mismatch"):
+        _check_insert_result(result, context="chunk insertion")
+
+
+def test_check_insert_result_raises_on_generic_string_error() -> None:
+    result = ["Some unexpected SurrealDB error"]
+    with pytest.raises(RuntimeError, match="INSERT IGNORE failed silently"):
+        _check_insert_result(result, context="test")
+
+
+@patch("kreuzberg_surrealdb.ingester.extract_file")
+async def test_pipeline_raises_on_chunk_dimension_mismatch(
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
+    sample_chunks: list[MagicMock],
+) -> None:
+    sample_extraction_result.chunks = sample_chunks
+    mock_extract.return_value = sample_extraction_result
+
+    # Doc insert succeeds, chunk insert returns a dimension error string
+    mock_client.query = AsyncMock(
+        side_effect=[
+            [],
+            ["Expected a vector of 768 dimensions, but got 384"],
+        ]
+    )
+
+    pipeline = DocumentPipeline(db=db_config)
+    pipeline._client = mock_client
+
+    with pytest.raises(RuntimeError, match="Vector dimension mismatch during chunk insertion"):
+        await pipeline.ingest_file("/tmp/test.pdf")
 
 
 @patch("kreuzberg_surrealdb.ingester.extract_bytes")

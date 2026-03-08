@@ -212,6 +212,23 @@ async def test_base_ingester_setup_schema_raises(db_config: DatabaseConfig) -> N
         await base.setup_schema()
 
 
+@patch("kreuzberg_surrealdb.ingester.extract_file")
+async def test_connector_raises_on_silent_insert_error(
+    mock_extract: MagicMock,
+    db_config: DatabaseConfig,
+    mock_client: AsyncMock,
+    sample_extraction_result: MagicMock,
+) -> None:
+    mock_extract.return_value = sample_extraction_result
+    mock_client.query = AsyncMock(return_value=["Some unexpected database error"])
+
+    connector = DocumentConnector(db=db_config)
+    connector._client = mock_client
+
+    with pytest.raises(RuntimeError, match="INSERT IGNORE failed silently"):
+        await connector.ingest_file("/tmp/test.pdf")
+
+
 # --- ingest_directory ---
 
 

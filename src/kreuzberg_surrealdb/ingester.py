@@ -62,6 +62,36 @@ def _map_result_to_doc(result: ExtractionResult, source: str, table: str) -> dic
     }
 
 
+def _check_insert_result(result: Any, *, context: str) -> None:
+    """Check INSERT IGNORE results for silent errors and raise if found.
+
+    SurrealDB's INSERT IGNORE swallows certain errors — returning error strings
+    in the result list instead of raising exceptions. This catches dimension
+    mismatches and other silent failures that would otherwise leave tables
+    empty with no user-visible error.
+    """
+    if not isinstance(result, list):
+        return
+    errors = [item for item in result if isinstance(item, str)]
+    if not errors:
+        return
+
+    dim_errors = [e for e in errors if "dimension" in e.lower()]
+    if dim_errors:
+        msg = (
+            f"Vector dimension mismatch during {context}. "
+            "SurrealDB v3 enforces HNSW dimensions server-globally — "
+            "once an index with dimension N exists anywhere on the server, "
+            "inserts with a different dimension fail even across namespaces and databases. "
+            "Use the same embedding model for all pipelines on the same server, "
+            f"or use separate SurrealDB instances. Server error: {dim_errors[0]}"
+        )
+        raise RuntimeError(msg)
+
+    msg = f"INSERT IGNORE failed silently during {context}: {errors[0]}"
+    raise RuntimeError(msg)
+
+
 def _collect_files(directory: str | Path, glob: str) -> list[Path]:
     """Collect matching file paths from a directory (sync helper)."""
     return sorted(p for p in Path(directory).glob(glob) if p.is_file())
@@ -127,6 +157,7 @@ class _BaseIngester:
                 f"INSERT IGNORE INTO {table} $records",
                 {"records": batch},
             )
+            _check_insert_result(res, context="document insertion")
             results.append(res)
         return results
 
@@ -256,10 +287,11 @@ class DocumentPipeline(_BaseIngester):
         doc_id = doc["id"]
         content_hash = doc["content_hash"]
 
-        await self._client.query(
+        res = await self._client.query(
             f"INSERT IGNORE INTO {table} $records",
             {"records": [doc]},
         )
+        _check_insert_result(res, context="document insertion")
 
         chunk_records: list[dict[str, Any]] = []
         for i, chunk in enumerate(result.chunks):
@@ -283,10 +315,11 @@ class DocumentPipeline(_BaseIngester):
         if chunk_records:
             for i in range(0, len(chunk_records), self._db_config.insert_batch_size):
                 batch = chunk_records[i : i + self._db_config.insert_batch_size]
-                await self._client.query(
+                res = await self._client.query(
                     f"INSERT IGNORE INTO {ct} $records",
                     {"records": batch},
                 )
+                _check_insert_result(res, context="chunk insertion")
 
     async def _embed_query(self, query: str) -> list[float]:
         """Embed a query string using kreuzberg's extraction pipeline."""
