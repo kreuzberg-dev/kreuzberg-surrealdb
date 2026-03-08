@@ -1,10 +1,16 @@
 """Document ingestion and search interface."""
 
 import hashlib
+import sys
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
+
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
 
 from kreuzberg import (
     ChunkingConfig,
@@ -39,7 +45,7 @@ def _parse_datetime(value: Any) -> datetime | None:
         except ValueError:
             return None
         else:
-            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
     return None
 
 

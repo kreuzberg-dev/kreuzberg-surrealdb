@@ -23,7 +23,7 @@ Local document extraction, local embeddings, and hybrid search in a single datab
 pip install kreuzberg-surrealdb
 ```
 
-Requires Python 3.11+.
+Requires Python 3.10+.
 
 ## Quickstart
 

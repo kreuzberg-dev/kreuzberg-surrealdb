@@ -29,7 +29,7 @@ keywords = [
 ]
 license = "MIT"
 authors = [ { name = "Kreuzberg.dev", email = "admin@kreuzberg.dev" } ]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -37,6 +37,7 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -48,8 +49,9 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "kreuzberg>=4.4.3",
+  "kreuzberg>=4.4.4",
   "surrealdb>=1.0.8",
+  "typing-extensions>=4; python_version<'3.11'",
 ]
 urls.Documentation = "https://docs.kreuzberg.dev"
 urls.Homepage = "https://github.com/kreuzberg-dev/kreuzberg-surrealdb"
@@ -79,7 +81,7 @@ build.targets.sdist.include = [
 build.targets.wheel.packages = [ "src/kreuzberg_surrealdb" ]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py310"
 line-length = 120
 lint.select = [ "ALL" ]
 lint.ignore = [ "ANN401", "COM812", "D100", "D104", "D203", "D213", "ISC001", "PLR0913" ]
@@ -124,6 +126,6 @@ run.source = [ "kreuzberg_surrealdb" ]
 report.fail_under = 80
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.10"
 strict = true
 exclude = [ "examples/" ]

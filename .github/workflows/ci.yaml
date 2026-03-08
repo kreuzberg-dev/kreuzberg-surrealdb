@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v6
 
@@ -67,13 +67,18 @@ jobs:
       - name: Start SurrealDB
         run: |
           docker run --rm -d -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root
-          for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break || sleep 1; done
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health; then
+              break
+            fi
+            sleep 1
+          done
 
       - name: Install ONNX Runtime
         run: |
           curl -sL -o /tmp/ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz"
           tar xzf /tmp/ort.tgz
-          sudo cp onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /usr/local/lib/libonnxruntime.so
+          sudo cp "onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION}" /usr/local/lib/libonnxruntime.so
           sudo ldconfig
 
       - name: Install dependencies
