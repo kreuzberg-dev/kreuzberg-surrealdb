@@ -55,16 +55,6 @@ jobs:
     env:
       ORT_VERSION: "1.23.0"
       SURREALDB_URL: "ws://localhost:8000"
-    services:
-      surrealdb:
-        image: rinatshay/surrealdb-service:latest
-        ports:
-          - 8000:8000
-        options: >-
-          --health-cmd "curl -sf http://localhost:8000/health || exit 1"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -73,6 +63,11 @@ jobs:
           python-version: "3.13"
 
       - uses: astral-sh/setup-uv@v6
+
+      - name: Start SurrealDB
+        run: |
+          docker run --rm -d -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root
+          for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break || sleep 1; done
 
       - name: Install ONNX Runtime
         run: |
