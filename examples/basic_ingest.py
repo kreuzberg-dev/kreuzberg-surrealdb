@@ -1,1 +1,0 @@
-"""Basic document ingestion example."""
