@@ -3,14 +3,13 @@
 Run with: uv run pytest tests/test_integration.py -v -m integration
 Uses mem:// (embedded SurrealDB) for local testing — no external server needed.
 
-Note: Some tests require ORT_DYLIB_PATH for kreuzberg's Rust ONNX embedding runtime.
-      conftest.py auto-detects this from the onnxruntime package.
+Note: ONNX Runtime must be installed on the system for embedding tests.
+      kreuzberg auto-discovers the library at runtime.
       SurrealDB's embedded mode (mem://) does not support search::rrf() or parameterized
       KNN limits ($limit in <|$limit,metric|>), so hybrid/vector search tests are skipped
       in embedded mode.
 """
 
-import os
 from pathlib import Path
 
 import pytest
@@ -21,10 +20,6 @@ from tests.conftest import FIXTURES_DIR
 
 pytestmark = pytest.mark.integration
 
-_can_embed = "ORT_DYLIB_PATH" in os.environ
-requires_embedding = pytest.mark.skipif(
-    not _can_embed, reason="ORT_DYLIB_PATH not set; kreuzberg cannot generate embeddings"
-)
 requires_server = pytest.mark.skip(
     reason="search::rrf and parameterized KNN require a full SurrealDB server, not mem://"
 )
@@ -320,7 +315,6 @@ async def test_pipeline_vector_search_raises_when_embed_false(mem_db_config: Dat
 # These tests require kreuzberg's ONNX runtime for embedding generation.
 
 
-@requires_embedding
 async def test_pipeline_embed_true_ingest_and_chunks_have_embeddings(
     mem_db_config: DatabaseConfig,
     sample_text_file: Path,
@@ -337,7 +331,6 @@ async def test_pipeline_embed_true_ingest_and_chunks_have_embeddings(
             assert len(chunk["embedding"]) == 768
 
 
-@requires_embedding
 async def test_pipeline_embed_true_dedup(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
     async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
@@ -350,7 +343,6 @@ async def test_pipeline_embed_true_dedup(mem_db_config: DatabaseConfig, sample_t
         assert second_count == first_count
 
 
-@requires_embedding
 async def test_pipeline_fast_preset_embeddings(mem_db_config: DatabaseConfig, sample_text_file: Path) -> None:
     async with DocumentPipeline(db=mem_db_config, embed=True, embedding_model="fast") as pipeline:
         await pipeline.setup_schema()
@@ -363,7 +355,6 @@ async def test_pipeline_fast_preset_embeddings(mem_db_config: DatabaseConfig, sa
             assert len(chunk["embedding"]) == 384
 
 
-@requires_embedding
 async def test_pipeline_embed_true_fulltext_search_still_works(
     mem_db_config: DatabaseConfig,
     sample_text_file: Path,
@@ -377,7 +368,6 @@ async def test_pipeline_embed_true_fulltext_search_still_works(
         assert len(results) > 0
 
 
-@requires_embedding
 async def test_pipeline_embed_true_multiple_docs_ingested(mem_db_config: DatabaseConfig, ml_corpus: Path) -> None:
     async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
@@ -631,7 +621,6 @@ async def test_pipeline_search_fixture_content_embed_false(mem_db_config: Databa
 # --- DocumentPipeline (embed=True): file path ingestion ---
 
 
-@requires_embedding
 @pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
 async def test_pipeline_ingest_file_fixture_embed_true(mem_db_config: DatabaseConfig, fmt: str) -> None:
     path = FIXTURE_FILES[fmt]
@@ -652,7 +641,6 @@ async def test_pipeline_ingest_file_fixture_embed_true(mem_db_config: DatabaseCo
 # --- DocumentPipeline (embed=True): bytes ingestion ---
 
 
-@requires_embedding
 @pytest.mark.parametrize("fmt", ["txt", "html", "pdf", "docx"])
 async def test_pipeline_ingest_bytes_fixture_embed_true(mem_db_config: DatabaseConfig, fmt: str) -> None:
     path = FIXTURE_FILES[fmt]
@@ -675,7 +663,6 @@ async def test_pipeline_ingest_bytes_fixture_embed_true(mem_db_config: DatabaseC
 # --- DocumentPipeline (embed=True): batch ingestion ---
 
 
-@requires_embedding
 async def test_pipeline_ingest_all_fixtures_embed_true(mem_db_config: DatabaseConfig) -> None:
     async with DocumentPipeline(db=mem_db_config, embed=True) as pipeline:
         await pipeline.setup_schema()
