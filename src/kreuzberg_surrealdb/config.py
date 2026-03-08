@@ -16,12 +16,14 @@ class DatabaseConfig:
     insert_batch_size: int = 100
 
     def __post_init__(self) -> None:
+        """Validate configuration values."""
         if self.db_url.startswith("mem://"):
-            raise ValueError(
+            msg = (
                 "In-memory mode (mem://) is not supported. "
                 "kreuzberg-surrealdb requires a SurrealDB v3 server. "
                 "Start one with: docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root"
             )
+            raise ValueError(msg)
 
 
 @dataclass
