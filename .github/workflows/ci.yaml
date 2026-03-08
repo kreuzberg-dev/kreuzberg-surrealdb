@@ -66,7 +66,7 @@ jobs:
 
       - name: Start SurrealDB
         run: |
-          docker run --rm -d -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root
+          docker run --rm -d -p 8000:8000 surrealdb/surrealdb:v2 start --user root --pass root
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break || sleep 1; done
 
       - name: Install ONNX Runtime
