@@ -107,6 +107,8 @@ def test_pipeline_preserves_user_chunking_params_embed_false(db_config: Database
     )
     pipeline = DocumentPipeline(db=db_config, config=user_config, embed=False)
 
+    assert pipeline._config is not None
+    assert pipeline._config.chunking is not None
     assert pipeline._config.chunking.max_chars == 256
     assert pipeline._config.chunking.embedding is None
 

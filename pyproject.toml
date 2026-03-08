@@ -95,6 +95,7 @@ ignore = ["D100", "D104", "D203", "D213", "COM812", "ISC001", "ANN401", "PLR0913
 [tool.mypy]
 python_version = "3.11"
 strict = true
+exclude = ["examples/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

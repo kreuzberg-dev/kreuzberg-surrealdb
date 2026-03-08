@@ -22,7 +22,7 @@ from pathlib import Path
 from kreuzberg_surrealdb import DatabaseConfig, DocumentPipeline
 
 
-async def ingest_and_search(directory: str, query: str) -> list[dict]:
+async def ingest_and_search(directory: str, query: str) -> list[dict[str, object]]:
     """Ingest documents from a directory and run hybrid search."""
     db = DatabaseConfig(
         db_url="ws://localhost:8000",
@@ -55,7 +55,7 @@ async def ingest_and_search(directory: str, query: str) -> list[dict]:
         return results
 
 
-def ask_llm(query: str, chunks: list[dict]) -> str:
+def ask_llm(query: str, chunks: list[dict[str, object]]) -> str:
     """Send retrieved chunks as context to Claude for answer generation."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -68,14 +68,10 @@ def ask_llm(query: str, chunks: list[dict]) -> str:
     try:
         import anthropic
     except ImportError:
-        return (
-            "[anthropic package not installed — skipping LLM call]\n\n"
-            "Install it with: pip install anthropic"
-        )
+        return "[anthropic package not installed — skipping LLM call]\n\nInstall it with: pip install anthropic"
 
     context = "\n\n---\n\n".join(
-        f"[Source: {c.get('source', c.get('document', 'unknown'))}]\n{c.get('content', '')}"
-        for c in chunks
+        f"[Source: {c.get('source', c.get('document', 'unknown'))}]\n{c.get('content', '')}" for c in chunks
     )
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -114,17 +110,17 @@ async def main(directory: str) -> None:
         print("No results found.")
         return
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Found {len(results)} chunk(s):")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     for i, result in enumerate(results, 1):
         content = result.get("content", "")[:150]
         print(f"\n[{i}] {content}...")
 
     # Pass chunks to LLM for answer generation
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("LLM Answer:")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     answer = ask_llm(query, results)
     print(answer)
 
