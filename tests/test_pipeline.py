@@ -4,6 +4,7 @@ import hashlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from kreuzberg import Chunk, ExtractionResult
 from surrealdb import RecordID
 
 from kreuzberg_surrealdb.config import DatabaseConfig
@@ -424,9 +425,9 @@ async def test_pipeline_raises_on_chunk_dimension_mismatch(
 
 @patch("kreuzberg_surrealdb.ingester.extract_bytes")
 async def test_embed_query_uses_kreuzberg(mock_extract: MagicMock, db_config: DatabaseConfig) -> None:
-    mock_chunk = MagicMock()
+    mock_chunk = MagicMock(spec=Chunk)
     mock_chunk.embedding = [0.1, 0.2, 0.3]
-    mock_result = MagicMock()
+    mock_result = MagicMock(spec=ExtractionResult)
     mock_result.chunks = [mock_chunk]
     mock_extract.return_value = mock_result
 
@@ -440,7 +441,7 @@ async def test_embed_query_uses_kreuzberg(mock_extract: MagicMock, db_config: Da
 
 @patch("kreuzberg_surrealdb.ingester.extract_bytes")
 async def test_embed_query_raises_on_empty_chunks(mock_extract: MagicMock, db_config: DatabaseConfig) -> None:
-    mock_result = MagicMock()
+    mock_result = MagicMock(spec=ExtractionResult)
     mock_result.chunks = []
     mock_extract.return_value = mock_result
 
@@ -452,9 +453,9 @@ async def test_embed_query_raises_on_empty_chunks(mock_extract: MagicMock, db_co
 
 @patch("kreuzberg_surrealdb.ingester.extract_bytes")
 async def test_embed_query_raises_on_none_embedding(mock_extract: MagicMock, db_config: DatabaseConfig) -> None:
-    mock_chunk = MagicMock()
+    mock_chunk = MagicMock(spec=Chunk)
     mock_chunk.embedding = None
-    mock_result = MagicMock()
+    mock_result = MagicMock(spec=ExtractionResult)
     mock_result.chunks = [mock_chunk]
     mock_extract.return_value = mock_result
 

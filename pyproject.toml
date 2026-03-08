@@ -57,7 +57,7 @@ classifiers = [
 ]
 dependencies = [
     "kreuzberg>=4.4.3",
-    "surrealdb>=1.0.8,<3.0",
+    "surrealdb>=1.0.8",
 ]
 
 [dependency-groups]

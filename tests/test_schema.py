@@ -7,9 +7,6 @@ from kreuzberg_surrealdb.schema import (
     build_pipeline_schema,
 )
 
-# --- build_document_schema ---
-
-
 def test_document_schema_generates_analyzer(index_config: IndexConfig) -> None:
     stmts = build_document_schema("documents", index_config)
     assert any("DEFINE ANALYZER" in s and "snowball(english)" in s for s in stmts)
@@ -60,9 +57,6 @@ def test_document_schema_custom_analyzer_language() -> None:
     assert any("snowball(german)" in s for s in stmts)
 
 
-# --- build_connector_schema ---
-
-
 def test_connector_schema_includes_document_schema(index_config: IndexConfig) -> None:
     stmts = build_connector_schema("documents", index_config)
     joined = " ".join(stmts)
@@ -84,9 +78,6 @@ def test_connector_schema_custom_bm25_params() -> None:
     stmts = build_connector_schema("documents", cfg)
     bm25_stmts = [s for s in stmts if "idx_doc_content" in s]
     assert "BM25(1.5,0.8)" in bm25_stmts[0]
-
-
-# --- build_pipeline_schema ---
 
 
 def test_pipeline_schema_includes_document_and_chunk_tables(index_config: IndexConfig) -> None:

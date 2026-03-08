@@ -4,10 +4,14 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from kreuzberg import Chunk, ExtractionResult
+from surrealdb import AsyncSurreal
 
 from kreuzberg_surrealdb.config import DatabaseConfig, IndexConfig
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+_SURREAL_CONNECTION_SPEC = type(AsyncSurreal(url="ws://localhost:8000"))
 
 
 @pytest.fixture
@@ -23,11 +27,7 @@ def index_config() -> IndexConfig:
 @pytest.fixture
 def mock_client() -> AsyncMock:
     """Mock AsyncSurreal connection."""
-    client = AsyncMock()
-    client.connect = AsyncMock()
-    client.close = AsyncMock()
-    client.signin = AsyncMock()
-    client.use = AsyncMock()
+    client = AsyncMock(spec=_SURREAL_CONNECTION_SPEC)
     client.query = AsyncMock(return_value=[])
     return client
 
@@ -35,7 +35,7 @@ def mock_client() -> AsyncMock:
 @pytest.fixture
 def sample_extraction_result() -> MagicMock:
     """A mock ExtractionResult with typical fields populated."""
-    result = MagicMock()
+    result = MagicMock(spec=ExtractionResult)
     result.content = "This is the extracted document content."
     result.mime_type = "text/plain"
     result.metadata = {"title": "Test Document", "authors": ["Alice", "Bob"]}
@@ -51,7 +51,7 @@ def sample_chunks() -> list[MagicMock]:
     """Mock chunks with embeddings and metadata."""
     chunks = []
     for i in range(3):
-        chunk = MagicMock()
+        chunk = MagicMock(spec=Chunk)
         chunk.content = f"Chunk {i} content about testing."
         chunk.embedding = [0.1 * i] * 768
         chunk.metadata = {
