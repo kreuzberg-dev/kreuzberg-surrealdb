@@ -4,11 +4,11 @@ Ingests a directory of documents, runs hybrid search, and passes retrieved
 chunks as context to an LLM for answer generation.
 
 Usage:
-    export ANTHROPIC_API_KEY="your-key"
-    uv run python examples/rag_pipeline.py <path-to-directory>
-
     # Start SurrealDB first:
     docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root
+
+    export ANTHROPIC_API_KEY="your-key"
+    uv run python examples/rag_pipeline.py <path-to-directory>
 
 Requirements:
     pip install anthropic  # LLM client (not included in kreuzberg-surrealdb dependencies)
@@ -19,24 +19,22 @@ import os
 import sys
 from pathlib import Path
 
-from kreuzberg_surrealdb import DatabaseConfig, DocumentPipeline
+from surrealdb import AsyncSurreal
+
+from kreuzberg_surrealdb import DocumentPipeline
 
 
 async def ingest_and_search(directory: str, query: str) -> list[dict[str, object]]:
     """Ingest documents from a directory and run hybrid search."""
-    db = DatabaseConfig(
-        db_url="ws://localhost:8000",
-        namespace="examples",
-        database="rag_pipeline",
-        username="root",
-        password="root",
-    )
+    async with AsyncSurreal("ws://localhost:8000") as db:
+        await db.signin({"username": "root", "password": "root"})
+        await db.use("examples", "rag_pipeline")
 
-    async with DocumentPipeline(
-        db=db,
-        embed=True,
-        embedding_model="balanced",
-    ) as pipeline:
+        pipeline = DocumentPipeline(
+            db=db,
+            embed=True,
+            embedding_model="balanced",
+        )
         await pipeline.setup_schema()
 
         path = Path(directory)

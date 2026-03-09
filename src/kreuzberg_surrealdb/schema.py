@@ -1,19 +1,33 @@
 """SurrealDB schema definitions and DDL generation."""
 
-from kreuzberg_surrealdb.config import IndexConfig
 
+def _build_analyzer(*, analyzer_language: str = "english") -> list[str]:
+    """Generate the shared BM25 analyzer definition.
 
-def _build_analyzer(index_config: IndexConfig) -> list[str]:
-    """Generate the shared BM25 analyzer definition."""
+    Args:
+        analyzer_language: Snowball stemmer language for the BM25 analyzer.
+
+    Returns:
+        A single-element list with the DEFINE ANALYZER DDL statement.
+
+    """
     return [
-        f"DEFINE ANALYZER IF NOT EXISTS doc_analyzer TOKENIZERS class "
-        f"FILTERS snowball({index_config.analyzer_language});",
+        f"DEFINE ANALYZER IF NOT EXISTS doc_analyzer TOKENIZERS class FILTERS snowball({analyzer_language});",
     ]
 
 
-def build_document_schema(table: str, index_config: IndexConfig) -> list[str]:
-    """Generate DDL for the documents table (used by both classes)."""
-    stmts = _build_analyzer(index_config)
+def build_document_schema(*, table: str = "documents", analyzer_language: str = "english") -> list[str]:
+    """Generate DDL for the documents table (used by both classes).
+
+    Args:
+        table: Name of the documents table.
+        analyzer_language: Snowball stemmer language for the BM25 analyzer.
+
+    Returns:
+        Ordered list of SurrealQL DDL statements for the table, fields, and indexes.
+
+    """
+    stmts = _build_analyzer(analyzer_language=analyzer_language)
     stmts.extend(
         [
             f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL;",
@@ -36,18 +50,44 @@ def build_document_schema(table: str, index_config: IndexConfig) -> list[str]:
     return stmts
 
 
-def build_connector_schema(table: str, index_config: IndexConfig) -> list[str]:
-    """Generate DDL for DocumentConnector: documents table + BM25 on documents.content."""
-    stmts = build_document_schema(table, index_config)
+def build_connector_schema(
+    *,
+    table: str = "documents",
+    analyzer_language: str = "english",
+    bm25_k1: float = 1.2,
+    bm25_b: float = 0.75,
+) -> list[str]:
+    """Generate DDL for DocumentConnector: documents table + BM25 on documents.content.
+
+    Args:
+        table: Name of the documents table.
+        analyzer_language: Snowball stemmer language for the BM25 analyzer.
+        bm25_k1: BM25 term-frequency saturation parameter.
+        bm25_b: BM25 document-length normalization parameter.
+
+    Returns:
+        Ordered list of SurrealQL DDL statements including the fulltext index.
+
+    """
+    stmts = build_document_schema(table=table, analyzer_language=analyzer_language)
     stmts.append(
         f"DEFINE INDEX IF NOT EXISTS idx_doc_content ON TABLE {table} "
-        f"FIELDS content FULLTEXT ANALYZER doc_analyzer BM25({index_config.bm25_k1},{index_config.bm25_b}) HIGHLIGHTS;",
+        f"FIELDS content FULLTEXT ANALYZER doc_analyzer BM25({bm25_k1},{bm25_b}) HIGHLIGHTS;",
     )
     return stmts
 
 
 def _build_chunk_schema(chunk_table: str, table: str) -> list[str]:
-    """Generate DDL for the chunks table."""
+    """Generate DDL for the chunks table.
+
+    Args:
+        chunk_table: Name of the chunks table.
+        table: Name of the parent documents table (for the record link type).
+
+    Returns:
+        Ordered list of SurrealQL DDL statements for the chunks table and fields.
+
+    """
     return [
         f"DEFINE TABLE IF NOT EXISTS {chunk_table} SCHEMAFULL;",
         f"DEFINE FIELD IF NOT EXISTS document ON TABLE {chunk_table} TYPE record<{table}>;",
@@ -64,24 +104,46 @@ def _build_chunk_schema(chunk_table: str, table: str) -> list[str]:
 
 
 def build_pipeline_schema(
-    table: str,
-    chunk_table: str,
     *,
+    table: str = "documents",
+    chunk_table: str = "chunks",
     embed: bool,
-    index_config: IndexConfig,
     embedding_dimension: int,
+    analyzer_language: str = "english",
+    bm25_k1: float = 1.2,
+    bm25_b: float = 0.75,
+    distance_metric: str = "COSINE",
+    hnsw_efc: int = 150,
+    hnsw_m: int = 12,
 ) -> list[str]:
-    """Generate DDL for DocumentPipeline: documents + chunks tables, conditional HNSW."""
-    stmts = build_document_schema(table, index_config)
+    """Generate DDL for DocumentPipeline: documents + chunks tables, conditional HNSW.
+
+    Args:
+        table: Name of the documents table.
+        chunk_table: Name of the chunks table.
+        embed: Whether to include an HNSW vector index on the chunks table.
+        embedding_dimension: Vector dimension for the HNSW index.
+        analyzer_language: Snowball stemmer language for the BM25 analyzer.
+        bm25_k1: BM25 term-frequency saturation parameter.
+        bm25_b: BM25 document-length normalization parameter.
+        distance_metric: HNSW distance function (e.g. ``"COSINE"``, ``"EUCLIDEAN"``).
+        hnsw_efc: HNSW construction-time search width (higher = slower build, better recall).
+        hnsw_m: HNSW max edges per node (higher = more memory, better recall).
+
+    Returns:
+        Ordered list of SurrealQL DDL statements for both tables and all indexes.
+
+    """
+    stmts = build_document_schema(table=table, analyzer_language=analyzer_language)
     stmts.extend(_build_chunk_schema(chunk_table, table))
     stmts.append(
         f"DEFINE INDEX IF NOT EXISTS idx_chunk_content ON TABLE {chunk_table} "
-        f"FIELDS content FULLTEXT ANALYZER doc_analyzer BM25({index_config.bm25_k1},{index_config.bm25_b}) HIGHLIGHTS;",
+        f"FIELDS content FULLTEXT ANALYZER doc_analyzer BM25({bm25_k1},{bm25_b}) HIGHLIGHTS;",
     )
     if embed:
         stmts.append(
             f"DEFINE INDEX IF NOT EXISTS idx_chunk_embedding ON TABLE {chunk_table} "
             f"FIELDS embedding HNSW DIMENSION {embedding_dimension} TYPE F32 "
-            f"DIST {index_config.distance_metric} EFC {index_config.hnsw_efc} M {index_config.hnsw_m};",
+            f"DIST {distance_metric} EFC {hnsw_efc} M {hnsw_m};",
         )
     return stmts

@@ -10,13 +10,19 @@ Install the package with dev dependencies:
 uv sync
 ```
 
+Start a SurrealDB server:
+
+```bash
+docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root
+```
+
 ## Examples
 
 ### `basic_ingest.py` — Document ingestion and BM25 search
 
-Uses `DocumentConnector` with an in-memory SurrealDB instance. Demonstrates:
+Uses `DocumentConnector` with a SurrealDB server. Demonstrates:
 
-- Configuring a database connection
+- Connecting to SurrealDB via the SDK
 - Setting up the schema
 - Ingesting a single file
 - Running BM25 full-text search
@@ -41,14 +47,17 @@ export ANTHROPIC_API_KEY="your-key"
 uv run python examples/rag_pipeline.py <path-to-directory>
 ```
 
-## Database Modes
+## Connection Pattern
 
-All examples default to `mem://` (in-memory embedded SurrealDB) for zero-setup usage. To use a remote instance:
+All examples connect to a local SurrealDB server using the SDK:
 
 ```python
-db = DatabaseConfig(
-    db_url="ws://localhost:8000",
-    username="root",
-    password="root",
-)
+from surrealdb import AsyncSurreal
+
+async with AsyncSurreal("ws://localhost:8000") as db:
+    await db.signin({"username": "root", "password": "root"})
+    await db.use("default", "default")
+
+    connector = DocumentConnector(db=db)
+    ...
 ```

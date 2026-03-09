@@ -6,13 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kreuzberg_surrealdb.config import DatabaseConfig
 from kreuzberg_surrealdb.ingester import DocumentConnector, _BaseIngester
 
 
-async def test_setup_schema_executes_all_statements(db_config: DatabaseConfig, mock_client: AsyncMock) -> None:
-    connector = DocumentConnector(db=db_config)
-    connector._client = mock_client
+async def test_setup_schema_executes_all_statements(mock_client: AsyncMock) -> None:
+    connector = DocumentConnector(db=mock_client)
 
     await connector.setup_schema()
 
@@ -27,14 +25,12 @@ async def test_setup_schema_executes_all_statements(db_config: DatabaseConfig, m
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_ingest_file(
     mock_extract: MagicMock,
-    db_config: DatabaseConfig,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
 
-    connector = DocumentConnector(db=db_config)
-    connector._client = mock_client
+    connector = DocumentConnector(db=mock_client)
 
     await connector.ingest_file("/tmp/test.pdf")
 
@@ -50,14 +46,12 @@ async def test_ingest_file(
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_ingest_files(
     mock_extract: MagicMock,
-    db_config: DatabaseConfig,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
 
-    connector = DocumentConnector(db=db_config)
-    connector._client = mock_client
+    connector = DocumentConnector(db=mock_client)
 
     await connector.ingest_files(["/tmp/a.pdf", "/tmp/b.pdf"])
 
@@ -68,14 +62,12 @@ async def test_ingest_files(
 @patch("kreuzberg_surrealdb.ingester.extract_bytes")
 async def test_ingest_bytes(
     mock_extract: MagicMock,
-    db_config: DatabaseConfig,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
 
-    connector = DocumentConnector(db=db_config)
-    connector._client = mock_client
+    connector = DocumentConnector(db=mock_client)
 
     await connector.ingest_bytes(data=b"hello world", mime_type="text/plain", source="api://response")
 
@@ -88,14 +80,12 @@ async def test_ingest_bytes(
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_content_hash_computed(
     mock_extract: MagicMock,
-    db_config: DatabaseConfig,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
 
-    connector = DocumentConnector(db=db_config)
-    connector._client = mock_client
+    connector = DocumentConnector(db=mock_client)
 
     await connector.ingest_file("/tmp/test.txt")
 
@@ -108,14 +98,12 @@ async def test_content_hash_computed(
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_metadata_fields_mapped(
     mock_extract: MagicMock,
-    db_config: DatabaseConfig,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
 
-    connector = DocumentConnector(db=db_config)
-    connector._client = mock_client
+    connector = DocumentConnector(db=mock_client)
 
     await connector.ingest_file("/tmp/test.txt")
 
@@ -129,12 +117,11 @@ async def test_metadata_fields_mapped(
     assert doc["keywords"] == [{"keyword": "test", "score": 0.8}]
 
 
-async def test_search_delegates_to_fulltext(db_config: DatabaseConfig, mock_client: AsyncMock) -> None:
+async def test_search_delegates_to_fulltext(mock_client: AsyncMock) -> None:
     expected = [{"content": "result", "score": 1.0}]
     mock_client.query = AsyncMock(return_value=expected)
 
-    connector = DocumentConnector(db=db_config)
-    connector._client = mock_client
+    connector = DocumentConnector(db=mock_client)
 
     result = await connector.search("test query", limit=5)
 
@@ -148,47 +135,8 @@ async def test_search_delegates_to_fulltext(db_config: DatabaseConfig, mock_clie
     assert params["limit"] == 5
 
 
-@patch("kreuzberg_surrealdb.ingester.AsyncSurreal")
-async def test_connect_and_close(mock_surreal_factory: MagicMock, db_config: DatabaseConfig) -> None:
-    mock_conn = AsyncMock()
-    mock_surreal_factory.return_value = mock_conn
-
-    connector = DocumentConnector(db=db_config)
-    await connector.connect()
-
-    mock_surreal_factory.assert_called_once_with(url="ws://localhost:8000")
-    mock_conn.connect.assert_called_once()
-    mock_conn.use.assert_called_once_with("test", "test")
-
-    await connector.close()
-    mock_conn.close.assert_called_once()
-
-
-@patch("kreuzberg_surrealdb.ingester.AsyncSurreal")
-async def test_connect_with_auth(mock_surreal_factory: MagicMock) -> None:
-    mock_conn = AsyncMock()
-    mock_surreal_factory.return_value = mock_conn
-
-    cfg = DatabaseConfig(db_url="ws://localhost:8000", username="root", password="root")
-    connector = DocumentConnector(db=cfg)
-    await connector.connect()
-
-    mock_conn.signin.assert_called_once_with({"username": "root", "password": "root"})
-
-
-@patch("kreuzberg_surrealdb.ingester.AsyncSurreal")
-async def test_context_manager(mock_surreal_factory: MagicMock, db_config: DatabaseConfig) -> None:
-    mock_conn = AsyncMock()
-    mock_surreal_factory.return_value = mock_conn
-
-    async with DocumentConnector(db=db_config) as connector:
-        assert connector._client is not None
-
-    mock_conn.close.assert_called_once()
-
-
-async def test_base_ingester_setup_schema_raises(db_config: DatabaseConfig) -> None:
-    base = _BaseIngester(db=db_config)
+async def test_base_ingester_setup_schema_raises(mock_client: AsyncMock) -> None:
+    base = _BaseIngester(db=mock_client)
     with pytest.raises(NotImplementedError):
         await base.setup_schema()
 
@@ -196,15 +144,13 @@ async def test_base_ingester_setup_schema_raises(db_config: DatabaseConfig) -> N
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_connector_raises_on_silent_insert_error(
     mock_extract: MagicMock,
-    db_config: DatabaseConfig,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
 ) -> None:
     mock_extract.return_value = sample_extraction_result
     mock_client.query = AsyncMock(return_value=["Some unexpected database error"])
 
-    connector = DocumentConnector(db=db_config)
-    connector._client = mock_client
+    connector = DocumentConnector(db=mock_client)
 
     with pytest.raises(RuntimeError, match="INSERT IGNORE failed silently"):
         await connector.ingest_file("/tmp/test.pdf")
@@ -213,7 +159,6 @@ async def test_connector_raises_on_silent_insert_error(
 @patch("kreuzberg_surrealdb.ingester.extract_file")
 async def test_ingest_directory(
     mock_extract: MagicMock,
-    db_config: DatabaseConfig,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
     tmp_path: Path,
@@ -225,8 +170,7 @@ async def test_ingest_directory(
 
     mock_extract.return_value = sample_extraction_result
 
-    connector = DocumentConnector(db=db_config)
-    connector._client = mock_client
+    connector = DocumentConnector(db=mock_client)
 
     await connector.ingest_directory(tmp_path, glob="**/*.txt")
 

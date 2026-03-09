@@ -1,18 +1,19 @@
 """Basic document ingestion and BM25 search with DocumentConnector.
 
 Usage:
-    uv run python examples/basic_ingest.py <path-to-file>
-
-    # With a remote SurrealDB:
+    # Start SurrealDB first:
     docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root
-    uv run python examples/basic_ingest.py report.pdf
+
+    uv run python examples/basic_ingest.py <path-to-file>
 """
 
 import asyncio
 import sys
 from pathlib import Path
 
-from kreuzberg_surrealdb import DatabaseConfig, DocumentConnector
+from surrealdb import AsyncSurreal
+
+from kreuzberg_surrealdb import DocumentConnector
 
 
 async def main(file_path: str) -> None:
@@ -21,15 +22,11 @@ async def main(file_path: str) -> None:
         print(f"File not found: {file_path}")
         sys.exit(1)
 
-    db = DatabaseConfig(
-        db_url="ws://localhost:8000",
-        namespace="examples",
-        database="basic_ingest",
-        username="root",
-        password="root",
-    )
+    async with AsyncSurreal("ws://localhost:8000") as db:
+        await db.signin({"username": "root", "password": "root"})
+        await db.use("examples", "basic_ingest")
 
-    async with DocumentConnector(db=db) as connector:
+        connector = DocumentConnector(db=db)
         await connector.setup_schema()
         print(f"Ingesting {path.name}...")
         await connector.ingest_file(path)

@@ -5,29 +5,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from kreuzberg import Chunk, ExtractionResult
-from surrealdb import AsyncSurreal
-
-from kreuzberg_surrealdb.config import DatabaseConfig, IndexConfig
+from surrealdb import AsyncWsSurrealConnection
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
-
-_SURREAL_CONNECTION_SPEC = type(AsyncSurreal(url="ws://localhost:8000"))
-
-
-@pytest.fixture
-def db_config() -> DatabaseConfig:
-    return DatabaseConfig(db_url="ws://localhost:8000", namespace="test", database="test")
-
-
-@pytest.fixture
-def index_config() -> IndexConfig:
-    return IndexConfig()
 
 
 @pytest.fixture
 def mock_client() -> AsyncMock:
     """Mock AsyncSurreal connection."""
-    client = AsyncMock(spec=_SURREAL_CONNECTION_SPEC)
+    client = AsyncMock(spec=AsyncWsSurrealConnection)
     client.query = AsyncMock(return_value=[])
     return client
 
