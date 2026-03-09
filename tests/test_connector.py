@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kreuzberg_surrealdb.ingester import DocumentConnector, _BaseIngester
+from kreuzberg_surrealdb.ingester import DocumentConnector
 
 
 async def test_setup_schema_executes_all_statements(mock_client: AsyncMock) -> None:
@@ -116,29 +116,6 @@ async def test_metadata_fields_mapped(
     assert doc["detected_languages"] == [{"language": "en", "confidence": 0.99}]
     assert doc["keywords"] == [{"keyword": "test", "score": 0.8}]
 
-
-async def test_search_delegates_to_fulltext(mock_client: AsyncMock) -> None:
-    expected = [{"content": "result", "score": 1.0}]
-    mock_client.query = AsyncMock(return_value=expected)
-
-    connector = DocumentConnector(db=mock_client)
-
-    result = await connector.search("test query", limit=5)
-
-    assert result == expected
-    call_args = mock_client.query.call_args
-    query_str = call_args[0][0]
-    assert "documents" in query_str
-    assert "@1@" in query_str
-    params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
-    assert params["query"] == "test query"
-    assert params["limit"] == 5
-
-
-async def test_base_ingester_setup_schema_raises(mock_client: AsyncMock) -> None:
-    base = _BaseIngester(db=mock_client)
-    with pytest.raises(NotImplementedError):
-        await base.setup_schema()
 
 
 @patch("kreuzberg_surrealdb.ingester.extract_file")

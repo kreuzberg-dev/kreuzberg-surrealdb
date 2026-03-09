@@ -271,8 +271,47 @@ class _BaseIngester:
         )
 
 
-class DocumentConnector(_BaseIngester):
+class DocumentConnector:
     """Full-document extraction and BM25 search. No chunking or embedding."""
+
+    ANALYZER_NAME: str = "doc_analyzer"
+
+    def __init__(
+        self,
+        *,
+        db: AsyncSurrealConnection,
+        table: str = "documents",
+        insert_batch_size: int = 100,
+        config: ExtractionConfig | None = None,
+    ) -> None:
+        """Initialize the connector.
+
+        Args:
+            db: An active SurrealDB async connection.
+            table: Name of the documents table.
+            insert_batch_size: Max records per INSERT IGNORE batch.
+            config: Optional Kreuzberg ExtractionConfig for extraction tuning.
+
+        """
+        self._client = db
+        self._table = table
+        self._insert_batch_size = insert_batch_size
+        self._config = config
+
+    @property
+    def client(self) -> AsyncSurrealConnection:
+        """The underlying SurrealDB connection."""
+        return self._client
+
+    @property
+    def table(self) -> str:
+        """The documents table name."""
+        return self._table
+
+    @property
+    def analyzer_name(self) -> str:
+        """The BM25 analyzer name used in the schema."""
+        return self.ANALYZER_NAME
 
     async def setup_schema(
         self,
@@ -298,18 +337,82 @@ class DocumentConnector(_BaseIngester):
         for stmt in stmts:
             await self._client.query(stmt)
 
-    async def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
-        """BM25 search over full document content.
+    async def _insert_documents(self, records: list[dict[str, Any]]) -> list[Value]:
+        """Insert documents with dedup via INSERT IGNORE.
 
         Args:
-            query: Search query string.
-            limit: Maximum number of results to return.
+            records: Document dicts to insert, each keyed by a deterministic RecordID.
 
         Returns:
-            List of matching document records with BM25 ``score``.
+            Raw INSERT IGNORE results from SurrealDB, one entry per batch.
 
         """
-        return await self.fulltext_search(query, limit=limit)
+        results: list[Value] = []
+        table = self._table
+        for i in range(0, len(records), self._insert_batch_size):
+            batch = records[i : i + self._insert_batch_size]
+            res = await self._client.query(
+                f"INSERT IGNORE INTO {table} $records",
+                {"records": batch},
+            )
+            _check_insert_result(res, context="document insertion")
+            results.append(res)
+        return results
+
+    async def _ingest_result(self, result: ExtractionResult, source: str) -> None:
+        """Process a single extraction result.
+
+        Args:
+            result: The extraction result from Kreuzberg.
+            source: Identifier for the document origin (e.g. file path).
+
+        """
+        doc = _map_result_to_doc(result, source, self._table)
+        await self._insert_documents([doc])
+
+    async def ingest_file(self, path: str | Path) -> None:
+        """Extract and ingest a single file.
+
+        Args:
+            path: Path to the file to extract and store.
+
+        """
+        result = await extract_file(str(path), config=self._config)
+        await self._ingest_result(result, str(path))
+
+    async def ingest_files(self, paths: Sequence[str | Path]) -> None:
+        """Extract and ingest multiple files.
+
+        Args:
+            paths: Sequence of file paths to extract and store.
+
+        """
+        for path in paths:
+            result = await extract_file(str(path), config=self._config)
+            await self._ingest_result(result, str(path))
+
+    async def ingest_directory(self, directory: str | Path, *, glob: str = "**/*") -> None:
+        """Extract and ingest all matching files in a directory.
+
+        Args:
+            directory: Root directory to search.
+            glob: Glob pattern for file matching. Defaults to all files recursively.
+
+        """
+        await self.ingest_files(_collect_files(directory, glob))
+
+    async def ingest_bytes(self, *, data: bytes, mime_type: str, source: str) -> None:
+        """Extract and ingest from raw bytes.
+
+        Args:
+            data: Raw file content.
+            mime_type: MIME type of the data (e.g. ``"application/pdf"``).
+            source: Identifier for the document origin.
+
+        """
+        result = await extract_bytes(data, mime_type, config=self._config)
+        await self._ingest_result(result, source)
+
 
 
 class DocumentPipeline(_BaseIngester):
