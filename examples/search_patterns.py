@@ -125,7 +125,8 @@ async def main(directory: str) -> None:
             print(SEPARATOR)
             hybrid = await pipeline.client.query(
                 f"SELECT * FROM search::rrf(["  # noqa: S608
-                f"(SELECT id, content, document.source AS source FROM {ct} WHERE embedding <|{LIMIT},COSINE|> $embedding),"
+                f"(SELECT id, content, document.source AS source FROM {ct}"
+                f" WHERE embedding <|{LIMIT},COSINE|> $embedding),"
                 f"(SELECT id, content, document.source AS source, search::score(1) AS score FROM {ct} "
                 f"WHERE content @1@ $query ORDER BY score DESC LIMIT {LIMIT})"
                 f"], {LIMIT}, 60);",

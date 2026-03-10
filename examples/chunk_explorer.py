@@ -87,9 +87,7 @@ async def search_chunks(pipeline: DocumentPipeline, query: str) -> list[dict[str
     return results
 
 
-async def show_siblings(
-    pipeline: DocumentPipeline, result: dict[str, Any]
-) -> None:
+async def show_siblings(pipeline: DocumentPipeline, result: dict[str, Any]) -> None:
     """Show all chunks from the same document as the given result."""
     ct = pipeline.chunk_table
     doc_id = result.get("document")

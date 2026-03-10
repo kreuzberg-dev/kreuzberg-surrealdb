@@ -72,14 +72,10 @@ async def main(directory: str) -> None:
         await pipeline.setup_schema()
 
         # Phase 1: First ingestion
-        first = await ingest_and_report(
-            pipeline, directory, f"First ingestion: {len(files)} file(s)"
-        )
+        first = await ingest_and_report(pipeline, directory, f"First ingestion: {len(files)} file(s)")
 
         # Phase 2: Re-ingest same directory (should be a no-op)
-        second = await ingest_and_report(
-            pipeline, directory, "Re-ingesting same directory (dedup test)", prev=first
-        )
+        second = await ingest_and_report(pipeline, directory, "Re-ingesting same directory (dedup test)", prev=first)
         if second == first:
             print("  Dedup confirmed: no duplicates created.")
         else:
@@ -92,9 +88,7 @@ async def main(directory: str) -> None:
             "It contains unique content that does not exist in any other file."
         )
         try:
-            third = await ingest_and_report(
-                pipeline, directory, "Adding a new file and re-ingesting", prev=second
-            )
+            third = await ingest_and_report(pipeline, directory, "Adding a new file and re-ingesting", prev=second)
             new_docs = third[0] - second[0]
             new_chunks = third[1] - second[1]
             print(f"  New documents: {new_docs}, new chunks: {new_chunks}")

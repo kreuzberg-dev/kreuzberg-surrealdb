@@ -131,7 +131,7 @@ asyncio.run(main())
 ### `DocumentConnector`
 
 ```python
-DocumentConnector(*, db: AsyncSurrealConnection, table: str = "documents", insert_batch_size: int = 100,
+DocumentConnector(*, db: AsyncSurrealQueryable, table: str = "documents", insert_batch_size: int = 100,
                   config: ExtractionConfig | None = None)
 ```
 
@@ -149,7 +149,7 @@ DocumentConnector(*, db: AsyncSurrealConnection, table: str = "documents", inser
 ### `DocumentPipeline`
 
 ```python
-DocumentPipeline(*, db: AsyncSurrealConnection, table: str = "documents", insert_batch_size: int = 100,
+DocumentPipeline(*, db: AsyncSurrealQueryable, table: str = "documents", insert_batch_size: int = 100,
                  chunk_table: str = "chunks", config: ExtractionConfig | None = None,
                  embed: bool = True, embedding_model: str | EmbeddingModelType = "balanced",
                  embedding_dimensions: int | None = None)
