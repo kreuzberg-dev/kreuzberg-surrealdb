@@ -15,13 +15,13 @@ from kreuzberg_surrealdb.ingester import DocumentPipeline, _check_insert_result
 def test_pipeline_defaults(mock_client: AsyncMock) -> None:
     pipeline = DocumentPipeline(db=mock_client)
     assert pipeline._embed is True
-    assert pipeline._chunk_table == "chunks"
-    assert pipeline._embedding_dimensions == 768
+    assert pipeline.chunk_table == "chunks"
+    assert pipeline.embedding_dimensions == 768
 
 
 def test_pipeline_custom_embedding_preset(mock_client: AsyncMock) -> None:
     pipeline = DocumentPipeline(db=mock_client, embedding_model="fast")
-    assert pipeline._embedding_dimensions == 384
+    assert pipeline.embedding_dimensions == 384
 
 
 def test_pipeline_invalid_embedding_preset(mock_client: AsyncMock) -> None:
@@ -34,7 +34,7 @@ def test_pipeline_embedding_model_type_direct(mock_client: AsyncMock) -> None:
 
     model = EmbeddingModelType.fastembed("BGEBaseENV15", 768)
     pipeline = DocumentPipeline(db=mock_client, embedding_model=model, embedding_dimensions=768)
-    assert pipeline._embedding_dimensions == 768
+    assert pipeline.embedding_dimensions == 768
 
 
 def test_pipeline_embedding_model_type_requires_dimensions(mock_client: AsyncMock) -> None:
@@ -52,7 +52,7 @@ def test_pipeline_embed_false(mock_client: AsyncMock) -> None:
 
 def test_pipeline_custom_chunk_table(mock_client: AsyncMock) -> None:
     pipeline = DocumentPipeline(db=mock_client, chunk_table="my_chunks")
-    assert pipeline._chunk_table == "my_chunks"
+    assert pipeline.chunk_table == "my_chunks"
 
 
 def test_pipeline_extraction_config_has_chunking(mock_client: AsyncMock) -> None:
@@ -268,118 +268,7 @@ async def test_pipeline_ingest_bytes(
     assert mock_extract.call_args[0][1] == "text/plain"
 
 
-# --- search ---
-
-
-async def test_pipeline_search_embed_false_falls_back_to_bm25(
-    mock_client: AsyncMock,
-) -> None:
-    expected = [{"content": "result", "score": 1.0}]
-    mock_client.query = AsyncMock(return_value=expected)
-
-    pipeline = DocumentPipeline(db=mock_client, embed=False)
-
-    result = await pipeline.search("test query")
-
-    assert result == expected
-    query_str = mock_client.query.call_args[0][0]
-    assert "chunks" in query_str
-    assert "@1@" in query_str
-
-
-async def test_pipeline_search_embed_true_uses_hybrid(mock_client: AsyncMock) -> None:
-    expected = [{"content": "result"}]
-    mock_client.query = AsyncMock(return_value=expected)
-
-    pipeline = DocumentPipeline(db=mock_client, embed=True)
-    pipeline._embed_query = AsyncMock(return_value=[0.1] * 768)  # type: ignore[method-assign]
-
-    result = await pipeline.search("test query", limit=5)
-
-    assert result == expected
-    query_str = mock_client.query.call_args[0][0]
-    assert "search::rrf" in query_str
-    params = mock_client.query.call_args[0][1]
-    assert params["embedding"] == [0.1] * 768
-    assert params["query"] == "test query"
-
-
-async def test_pipeline_vector_search(mock_client: AsyncMock) -> None:
-    expected = [{"content": "result", "distance": 0.1}]
-    mock_client.query = AsyncMock(return_value=expected)
-
-    pipeline = DocumentPipeline(db=mock_client, embed=True)
-    pipeline._embed_query = AsyncMock(return_value=[0.1] * 768)  # type: ignore[method-assign]
-
-    result = await pipeline.vector_search("test query", limit=5)
-
-    assert result == expected
-    query_str = mock_client.query.call_args[0][0]
-    assert "vector::distance::knn()" in query_str
-
-
-async def test_pipeline_vector_search_raises_when_embed_false(
-    mock_client: AsyncMock,
-) -> None:
-    pipeline = DocumentPipeline(db=mock_client, embed=False)
-
-    with pytest.raises(ValueError, match="embed=True"):
-        await pipeline.vector_search("test query")
-
-
-async def test_pipeline_fulltext_search_targets_chunks(mock_client: AsyncMock) -> None:
-    mock_client.query = AsyncMock(return_value=[])
-
-    pipeline = DocumentPipeline(db=mock_client)
-
-    await pipeline.fulltext_search("test query")
-
-    query_str = mock_client.query.call_args[0][0]
-    assert "chunks" in query_str
-
-
-async def test_pipeline_search_with_quality_threshold(mock_client: AsyncMock) -> None:
-    expected = [{"content": "result"}]
-    mock_client.query = AsyncMock(return_value=expected)
-
-    pipeline = DocumentPipeline(db=mock_client, embed=True)
-    pipeline._embed_query = AsyncMock(return_value=[0.1] * 768)  # type: ignore[method-assign]
-
-    result = await pipeline.search("test query", quality_threshold=0.8)
-
-    assert result == expected
-    query_str = mock_client.query.call_args[0][0]
-    assert "document.quality_score >= $quality_threshold" in query_str
-    params = mock_client.query.call_args[0][1]
-    assert params["quality_threshold"] == 0.8
-
-
-async def test_pipeline_search_without_quality_threshold(mock_client: AsyncMock) -> None:
-    mock_client.query = AsyncMock(return_value=[])
-
-    pipeline = DocumentPipeline(db=mock_client, embed=True)
-    pipeline._embed_query = AsyncMock(return_value=[0.1] * 768)  # type: ignore[method-assign]
-
-    await pipeline.search("test query")
-
-    query_str = mock_client.query.call_args[0][0]
-    assert "quality_score" not in query_str
-
-
-async def test_pipeline_vector_search_with_quality_threshold(mock_client: AsyncMock) -> None:
-    expected = [{"content": "result", "distance": 0.1}]
-    mock_client.query = AsyncMock(return_value=expected)
-
-    pipeline = DocumentPipeline(db=mock_client, embed=True)
-    pipeline._embed_query = AsyncMock(return_value=[0.1] * 768)  # type: ignore[method-assign]
-
-    result = await pipeline.vector_search("test query", quality_threshold=0.7)
-
-    assert result == expected
-    query_str = mock_client.query.call_args[0][0]
-    assert "document.quality_score >= $quality_threshold" in query_str
-    params = mock_client.query.call_args[0][1]
-    assert params["quality_threshold"] == 0.7
+# --- _check_insert_result ---
 
 
 def test_check_insert_result_passes_on_normal_results() -> None:
@@ -424,6 +313,9 @@ async def test_pipeline_raises_on_chunk_dimension_mismatch(
         await pipeline.ingest_file("/tmp/test.pdf")
 
 
+# --- embed_query ---
+
+
 @patch("kreuzberg_surrealdb.ingester.extract_bytes")
 async def test_embed_query_uses_kreuzberg(mock_extract: MagicMock, mock_client: AsyncMock) -> None:
     mock_chunk = MagicMock(spec=Chunk)
@@ -434,7 +326,7 @@ async def test_embed_query_uses_kreuzberg(mock_extract: MagicMock, mock_client: 
 
     pipeline = DocumentPipeline(db=mock_client, embed=True)
 
-    result = await pipeline._embed_query("test query")
+    result = await pipeline.embed_query("test query")
 
     mock_extract.assert_called_once_with(b"test query", "text/plain", config=pipeline._config)
     assert result == [0.1, 0.2, 0.3]
@@ -449,7 +341,7 @@ async def test_embed_query_raises_on_empty_chunks(mock_extract: MagicMock, mock_
     pipeline = DocumentPipeline(db=mock_client, embed=True)
 
     with pytest.raises(RuntimeError, match="Embedding generation failed"):
-        await pipeline._embed_query("test query")
+        await pipeline.embed_query("test query")
 
 
 @patch("kreuzberg_surrealdb.ingester.extract_bytes")
@@ -463,4 +355,4 @@ async def test_embed_query_raises_on_none_embedding(mock_extract: MagicMock, moc
     pipeline = DocumentPipeline(db=mock_client, embed=True)
 
     with pytest.raises(RuntimeError, match="Embedding generation failed"):
-        await pipeline._embed_query("test query")
+        await pipeline.embed_query("test query")

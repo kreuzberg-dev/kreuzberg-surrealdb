@@ -8,7 +8,7 @@ Usage:
     # Start SurrealDB first:
     docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start --allow-all --user root --pass root
 
-    uv run python examples/inspect_document.py <file>...
+    uv run python examples/ingest_document.py <file>...
 """
 
 import asyncio
@@ -93,6 +93,8 @@ async def main(file_paths: list[str]) -> None:
                 snippet = r.get("snippet", "")[:200]
                 print(f"  score {r.get('score', 0):.4f} | {snippet}")
             print()
+        elif docs:
+            print("(no keywords extracted — skipping demo search)\n")
 
         # --- Interactive search loop ---
         print("Enter a search query to run BM25 search, or 'q' to quit.\n")
@@ -117,6 +119,6 @@ async def main(file_paths: list[str]) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: uv run python examples/inspect_document.py <file>...")
+        print("Usage: uv run python examples/ingest_document.py <file>...")
         sys.exit(1)
     asyncio.run(main(sys.argv[1:]))

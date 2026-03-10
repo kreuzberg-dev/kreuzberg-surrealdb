@@ -18,33 +18,52 @@ docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass
 
 ## Examples
 
-### `basic_ingest.py` — Document ingestion and BM25 search
+### `ingest_document.py` — Document ingestion with `DocumentConnector`
 
 Uses `DocumentConnector` with a SurrealDB server. Demonstrates:
 
 - Connecting to SurrealDB via the SDK
 - Setting up the schema
 - Ingesting a single file
-- Running BM25 full-text search
 
 ```bash
-uv run python examples/basic_ingest.py <path-to-file>
+uv run python examples/ingest_document.py <path-to-file>
 ```
 
-### `rag_pipeline.py` — Hybrid RAG pipeline with LLM integration
+### `search_patterns.py` — BM25, vector, and hybrid search
 
-Uses `DocumentPipeline` with embeddings and hybrid search, then feeds results to an LLM for answer generation. Demonstrates:
+Uses `DocumentPipeline` with embeddings. Demonstrates all three search modes in an interactive loop:
 
-- Chunked ingestion with local embeddings
-- Hybrid search (vector + BM25 with RRF fusion)
-- Passing retrieved chunks as context to an LLM API
-- Quality threshold filtering
+- BM25 full-text search with `search::highlight()` for term highlighting
+- Vector (HNSW) semantic search with cosine distances
+- Hybrid RRF fusion (vector + BM25) via `search::rrf()`
 
 ```bash
-# Requires an API key for the LLM provider
-export ANTHROPIC_API_KEY="your-key"
+uv run python examples/search_patterns.py <path-to-directory>
+```
 
-uv run python examples/rag_pipeline.py <path-to-directory>
+### `chunk_explorer.py` — Record link traversal and chunk navigation
+
+Uses `DocumentPipeline` to explore chunk→document relationships. Demonstrates:
+
+- Chunk counts per document via record link aggregation
+- BM25 search with parent document metadata (`document.source`, `document.quality_score`)
+- Sibling chunk navigation (all chunks from the same document)
+
+```bash
+uv run python examples/chunk_explorer.py <path-to-directory>
+```
+
+### `incremental_ingest.py` — Deduplication and incremental updates
+
+Uses `DocumentPipeline` to demonstrate idempotent ingestion. Shows:
+
+- First ingestion: all documents and chunks are inserted
+- Re-ingestion: INSERT IGNORE skips duplicates (same content hash)
+- Adding new files: only new content is added
+
+```bash
+uv run python examples/incremental_ingest.py <path-to-directory>
 ```
 
 ## Connection Pattern

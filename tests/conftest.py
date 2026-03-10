@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from kreuzberg import Chunk, ExtractionResult
-from surrealdb import AsyncWsSurrealConnection
+from kreuzberg_surrealdb import AsyncSurrealConnection
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -13,7 +13,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 @pytest.fixture
 def mock_client() -> AsyncMock:
     """Mock AsyncSurreal connection."""
-    client = AsyncMock(spec=AsyncWsSurrealConnection)
+    client = AsyncMock(spec=AsyncSurrealConnection)
     client.query = AsyncMock(return_value=[])
     return client
 

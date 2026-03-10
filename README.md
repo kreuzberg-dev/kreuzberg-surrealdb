@@ -1,8 +1,8 @@
 # kreuzberg-surrealdb
 
-Kreuzberg-to-SurrealDB connector for zero-dependency RAG pipelines.
+Kreuzberg-to-SurrealDB connector for document ingestion pipelines.
 
-Local document extraction, local embeddings, and hybrid search in a single database — no external API keys required.
+Bridges [Kreuzberg](https://github.com/kreuzberg-dev/kreuzberg) extraction into [SurrealDB](https://surrealdb.com/) — handles schema generation, content deduplication, chunk storage, and index configuration.
 
 [![PyPI](https://img.shields.io/pypi/v/kreuzberg-surrealdb)](https://pypi.org/project/kreuzberg-surrealdb/)
 [![Python](https://img.shields.io/pypi/pyversions/kreuzberg-surrealdb)](https://pypi.org/project/kreuzberg-surrealdb/)
@@ -10,12 +10,13 @@ Local document extraction, local embeddings, and hybrid search in a single datab
 
 ## Features
 
-- **Multi-format extraction** — PDF, DOCX, XLSX, HTML, images (with OCR), and [75+ formats](https://github.com/kreuzberg-dev/kreuzberg) via Kreuzberg
-- **Local embeddings** — CPU-based ONNX models via [Kreuzberg](https://github.com/kreuzberg-dev/kreuzberg), no API keys or GPU needed
-- **Three search modes** — BM25 full-text, HNSW vector, and hybrid (RRF fusion)
-- **Content deduplication** — SHA-256 hashing prevents duplicate documents across ingestion runs
-- **Quality filtering** — filter search results by Kreuzberg's extraction quality score
-- **Configurable indexing** — tune BM25, HNSW, and RRF parameters directly on `setup_schema()` and search methods
+- **Automated schema management** — generates SurrealDB tables, BM25/HNSW indexes, and analyzers via `setup_schema()`
+- **Content deduplication** — SHA-256 content hashing with deterministic record IDs prevents duplicates across ingestion runs
+- **Two-tier architecture** — `DocumentConnector` for full documents, `DocumentPipeline` for chunked + embedded documents
+- **Flexible embedding control** — use preset models, custom ONNX models via kreuzberg's `EmbeddingModelType`, or disable embeddings entirely with `embed=False`
+- **Record-linked chunks** — chunks reference their parent document via SurrealDB record links, enabling join-like traversal in SurQL
+- **Configurable indexing** — tune BM25 (k1, b, analyzer language) and HNSW (distance metric, EFC, M) parameters per schema
+- **Batch ingestion** — ingest single files, multiple files, directories (with glob), or raw bytes, with configurable `insert_batch_size`
 
 ## Installation
 
@@ -30,7 +31,7 @@ Requires Python 3.10+.
 ### Start a SurrealDB server
 
 ```bash
-docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root
+docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start --allow-all --user root --pass root
 ```
 
 ### Document-level search with `DocumentConnector`
@@ -52,7 +53,13 @@ async def main():
     await connector.setup_schema()
     await connector.ingest_file("report.pdf")
 
-    results = await connector.search("quarterly revenue", limit=5)
+    # BM25 full-text search via the SurrealDB client
+    t = connector.table
+    results = await connector.client.query(
+        f"SELECT *, search::score(1) AS score FROM {t} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT $limit",
+        {"query": "quarterly revenue", "limit": 5},
+    )
     for r in results:
         print(r["source"], r["score"])
 
@@ -79,26 +86,45 @@ async def main():
         await pipeline.setup_schema()
         await pipeline.ingest_directory("./papers", glob="**/*.pdf")
 
+        ct = pipeline.chunk_table
+
         # Hybrid search (vector + BM25 with RRF)
-        results = await pipeline.search("attention mechanisms in transformers")
+        embedding = await pipeline.embed_query("attention mechanisms in transformers")
+        results = await pipeline.client.query(
+            f"SELECT * FROM search::rrf(["
+            f"(SELECT id, content FROM {ct} WHERE embedding <|10,COSINE|> $embedding),"
+            f"(SELECT id, content, search::score(1) AS score FROM {ct} "
+            f"WHERE content @1@ $query ORDER BY score DESC LIMIT 10)"
+            f"], 10, 60);",
+            {"embedding": embedding, "query": "attention mechanisms in transformers"},
+        )
 
         # Pure vector search
-        results = await pipeline.vector_search("how neural networks learn")
+        embedding = await pipeline.embed_query("how neural networks learn")
+        results = await pipeline.client.query(
+            f"SELECT *, vector::distance::knn() AS distance FROM {ct} "
+            f"WHERE embedding <|10,COSINE|> $embedding ORDER BY distance",
+            {"embedding": embedding},
+        )
 
         # BM25 search over chunks
-        results = await pipeline.fulltext_search("error code XYZ-123")
+        results = await pipeline.client.query(
+            f"SELECT *, search::score(1) AS score FROM {ct} "
+            f"WHERE content @1@ $query ORDER BY score DESC LIMIT 10",
+            {"query": "error code XYZ-123"},
+        )
 
 asyncio.run(main())
 ```
 
-## Start Simple, Scale Up
+## Choosing a Class
 
-| | `DocumentConnector` | `DocumentPipeline` |
-|---|---|---|
-| Stores | Full documents | Documents + chunks |
-| Embeddings | No | Yes (configurable) |
-| Search | BM25 full-text | BM25, vector, hybrid (RRF) |
-| Best for | Keyword search on whole docs | Semantic/hybrid search on chunks |
+| | `DocumentConnector` | `DocumentPipeline` | `DocumentPipeline(embed=False)` |
+|---|---|---|---|
+| Stores | Full documents | Documents + chunks | Documents + chunks |
+| Embeddings | No | Yes (configurable) | No |
+| Indexes | BM25 on documents | BM25 + HNSW on chunks | BM25 on chunks |
+| Best for | Keyword search on whole docs | Semantic/hybrid search on chunks | Keyword search on chunks |
 
 ## API Reference
 
@@ -109,14 +135,16 @@ DocumentConnector(*, db: AsyncSurrealConnection, table: str = "documents", inser
                   config: ExtractionConfig | None = None)
 ```
 
-| Method | Description |
+| Method / Property | Description |
 |---|---|
+| `client` | The underlying SurrealDB connection |
+| `table` | The documents table name |
+| `analyzer_name` | The BM25 analyzer name (for use in custom SurQL) |
 | `setup_schema(*, analyzer_language="english", bm25_k1=1.2, bm25_b=0.75)` | Create documents table and BM25 index |
 | `ingest_file(path)` | Extract and store a single file |
 | `ingest_files(paths)` | Extract and store multiple files |
 | `ingest_directory(directory, *, glob="**/*")` | Extract and store all matching files |
 | `ingest_bytes(*, data, mime_type, source)` | Extract and store from raw bytes |
-| `search(query, *, limit=10)` | BM25 full-text search |
 
 ### `DocumentPipeline`
 
@@ -127,20 +155,30 @@ DocumentPipeline(*, db: AsyncSurrealConnection, table: str = "documents", insert
                  embedding_dimensions: int | None = None)
 ```
 
-All `DocumentConnector` ingestion methods are available, plus:
-
-| Method | Description |
+| Method / Property | Description |
 |---|---|
-| `setup_schema(*, analyzer_language="english", bm25_k1=1.2, bm25_b=0.75, distance_metric="COSINE", hnsw_efc=150, hnsw_m=12)` | Create documents + chunks tables with BM25 and HNSW indexes |
-| `search(query, *, limit=10, quality_threshold=None, distance_metric="COSINE", rrf_k=60)` | Hybrid search (vector + BM25 with RRF). Falls back to BM25 when `embed=False` |
-| `vector_search(query, *, limit=10, quality_threshold=None, distance_metric="COSINE")` | Pure HNSW semantic search. Requires `embed=True` |
-| `fulltext_search(query, *, limit=10)` | BM25 search over chunks |
+| `client` | The underlying SurrealDB connection |
+| `table` | The documents table name |
+| `chunk_table` | The chunks table name |
+| `analyzer_name` | The BM25 analyzer name (for use in custom SurQL) |
+| `embedding_dimensions` | The vector embedding dimensions |
+| `setup_schema(*, analyzer_language="english", bm25_k1=1.2, bm25_b=0.75, distance_metric="COSINE", hnsw_efc=150, hnsw_m=12)` | Create documents + chunks tables with BM25 and HNSW indexes (HNSW skipped when `embed=False`) |
+| `ingest_file(path)` | Extract and store a single file |
+| `ingest_files(paths)` | Extract and store multiple files |
+| `ingest_directory(directory, *, glob="**/*")` | Extract and store all matching files |
+| `ingest_bytes(*, data, mime_type, source)` | Extract and store from raw bytes |
+| `embed_query(query)` | Embed a query string, returns `list[float]` (only when `embed=True`) |
 
 ### Embedding Models
 
-Pass a preset name (string) or an `EmbeddingModelType` directly.
+The `embedding_model` parameter accepts a preset name (string) or an `EmbeddingModelType` directly.
 
-**Presets** (convenient defaults):
+**Preset string** — dimensions are auto-inferred:
+
+```python
+# Uses bge-base-en-v1.5, dimensions automatically set to 768
+pipeline = DocumentPipeline(db=db, embedding_model="balanced")
+```
 
 | Preset | Model | Dimensions | Notes |
 |---|---|---|---|
@@ -149,24 +187,18 @@ Pass a preset name (string) or an `EmbeddingModelType` directly.
 | `"quality"` | bge-large-en-v1.5 | 1024 | Best English quality |
 | `"multilingual"` | multilingual-e5-base | 768 | Non-English documents |
 
-**Direct model selection** (40+ models via kreuzberg's fastembed runtime):
+**`EmbeddingModelType`** — you must provide `embedding_dimensions` (the type is opaque):
 
 ```python
 from kreuzberg import EmbeddingModelType
 
 # Use any supported fastembed model
-pipeline = DocumentPipeline(
-    db=db,
-    embedding_model=EmbeddingModelType.fastembed("NomicEmbedTextV15", 768),
-    embedding_dimensions=768,
-)
+model = EmbeddingModelType.fastembed("NomicEmbedTextV15", 768)
+pipeline = DocumentPipeline(db=db, embedding_model=model, embedding_dimensions=768)
 
 # Use a custom ONNX model
-pipeline = DocumentPipeline(
-    db=db,
-    embedding_model=EmbeddingModelType.custom("my-model", 512),
-    embedding_dimensions=512,
-)
+model = EmbeddingModelType.custom("my-model", 512)
+pipeline = DocumentPipeline(db=db, embedding_model=model, embedding_dimensions=512)
 ```
 
 ### Chunking Configuration
@@ -241,34 +273,17 @@ await connector.ingest_file("report_copy.pdf")  # skipped if content matches
 
 ## Quality Filtering
 
-Kreuzberg assigns a `quality_score` (0.0–1.0) to each extraction. Use `quality_threshold` to exclude low-quality results at search time:
+Each document record stores a `quality_score` (0.0–1.0) from extraction. Use it to filter low-quality extractions in SurQL queries:
 
 ```python
-results = await pipeline.search("budget projections", quality_threshold=0.7)
-results = await pipeline.vector_search("budget projections", quality_threshold=0.7)
+ct = pipeline.chunk_table
+results = await pipeline.client.query(
+    f"SELECT *, search::score(1) AS score FROM {ct} "
+    f"WHERE document.quality_score >= $threshold AND content @1@ $query "
+    f"ORDER BY score DESC LIMIT $limit",
+    {"query": "budget projections", "threshold": 0.7, "limit": 10},
+)
 ```
-
-## Known Limitations
-
-### One embedding dimension per SurrealDB server
-
-SurrealDB v3 has a bug where HNSW vector dimension validation is **server-global**: once any HNSW index with dimension N exists anywhere on the server, inserts with a different dimension fail — even across namespaces and databases.
-
-**What this means:** All `DocumentPipeline` instances sharing the same SurrealDB server must use the same embedding model (and dimensions). You cannot mix `"fast"` (384d) and `"balanced"` (768d) on the same server.
-
-```python
-# This works — same model on one server
-pipeline_a = DocumentPipeline(db=db_a, embedding_model="balanced")  # 768d
-pipeline_b = DocumentPipeline(db=db_b, embedding_model="balanced")  # 768d
-
-# This FAILS — different dimensions on one server
-pipeline_a = DocumentPipeline(db=db_a, embedding_model="balanced")  # 768d
-pipeline_b = DocumentPipeline(db=db_b, embedding_model="fast")      # 384d — inserts will fail
-```
-
-**Workaround:** Use separate SurrealDB server instances for different embedding dimensions.
-
-kreuzberg-surrealdb detects this condition and raises a `RuntimeError` with a clear message instead of silently dropping data.
 
 ## Connection Lifecycle
 
@@ -299,11 +314,79 @@ finally:
     await db.close()
 ```
 
-## Stored Fields
+## Database Schema
 
-Each **document** record contains: `source`, `content`, `mime_type`, `title`, `authors`, `created_at`, `ingested_at`, `metadata`, `quality_score`, `content_hash`, `detected_languages`, `keywords`.
+`setup_schema()` generates schemafull tables with indexes. Table names are configurable via constructor parameters; values below are defaults.
 
-Each **chunk** record (pipeline only) contains: `document` (record link), `content`, `chunk_index`, `embedding`, `token_count`, `page_number`, `char_start`, `char_end`, `first_page`, `last_page`.
+### `DocumentConnector`
+
+```mermaid
+erDiagram
+    documents {
+        RecordID id "SHA-256(content)"
+        string source "UNIQUE"
+        string content "BM25 FULLTEXT"
+        string mime_type
+        string content_hash "UNIQUE"
+        datetime ingested_at "DEFAULT time::now()"
+        float quality_score "optional"
+        string title "optional"
+        array authors "optional, array of string"
+        datetime created_at "optional"
+        object metadata "FLEXIBLE"
+        array detected_languages "optional, array of object"
+        array keywords "optional, array of object"
+    }
+```
+
+BM25 index on `documents.content` with configurable k1/b parameters. Analyzer uses class tokenizer with Snowball stemmer.
+
+### `DocumentPipeline`
+
+```mermaid
+erDiagram
+    documents ||--o{ chunks : "1:N record link"
+    documents {
+        RecordID id "SHA-256(content)"
+        string source "UNIQUE"
+        string content
+        string mime_type
+        string content_hash "UNIQUE"
+        datetime ingested_at "DEFAULT time::now()"
+        float quality_score "optional"
+        string title "optional"
+        array authors "optional, array of string"
+        datetime created_at "optional"
+        object metadata "FLEXIBLE"
+        array detected_languages "optional, array of object"
+        array keywords "optional, array of object"
+    }
+    chunks {
+        RecordID id "hash_chunkIndex"
+        record document "record link to documents"
+        string content "BM25 FULLTEXT"
+        int chunk_index
+        array embedding "optional, HNSW vector index"
+        int token_count "optional"
+        int page_number "optional"
+        int char_start "optional"
+        int char_end "optional"
+        int first_page "optional"
+        int last_page "optional"
+    }
+```
+
+BM25 index on `chunks.content` (not documents). HNSW vector index on `chunks.embedding` only when `embed=True`, with configurable dimension, distance metric, EFC, and M parameters.
+
+The `document` field is a SurrealDB record link — use it in SurQL to traverse to the parent or filter by document-level fields:
+
+```surql
+-- Get chunk with its document's source and quality score
+SELECT *, document.source, document.quality_score FROM chunks WHERE content @1@ "budget" LIMIT 5;
+
+-- Get sibling chunks from the same document
+SELECT * FROM chunks WHERE document = $chunk.document ORDER BY chunk_index;
+```
 
 ## Development
 

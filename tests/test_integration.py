@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from surrealdb import AsyncSurreal
 
-from kreuzberg_surrealdb.ingester import AsyncSurrealConnection, DocumentConnector, DocumentPipeline
+from kreuzberg_surrealdb import AsyncSurrealConnection, DocumentConnector, DocumentPipeline
 from tests.conftest import FIXTURES_DIR
 
 pytestmark = pytest.mark.integration
@@ -88,7 +88,12 @@ async def test_connector_full_roundtrip(server_db: AsyncSurrealConnection, sampl
     await connector.setup_schema()
     await connector.ingest_file(sample_text_file)
 
-    results = await connector.search("machine learning", limit=5)
+    t = connector.table
+    results = await connector.client.query(
+        f"SELECT *, search::score(1) AS score FROM {t} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT $limit",
+        {"query": "machine learning", "limit": 5},
+    )
     assert len(results) > 0
 
 
@@ -101,7 +106,12 @@ async def test_connector_ingest_multiple_files(
     await connector.setup_schema()
     await connector.ingest_files([sample_text_file, second_text_file])
 
-    results = await connector.search("database", limit=10)
+    t = connector.table
+    results = await connector.client.query(
+        f"SELECT *, search::score(1) AS score FROM {t} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT $limit",
+        {"query": "database", "limit": 10},
+    )
     assert len(results) > 0
 
 
@@ -111,7 +121,7 @@ async def test_connector_dedup_same_content(server_db: AsyncSurrealConnection, s
     await connector.ingest_file(sample_text_file)
     await connector.ingest_file(sample_text_file)
 
-    all_docs = await connector._client.query("SELECT * FROM documents")
+    all_docs = await connector.client.query("SELECT * FROM documents")
     assert len(all_docs) == 1
 
 
@@ -121,7 +131,12 @@ async def test_connector_ingest_bytes(server_db: AsyncSurrealConnection) -> None
     content = b"Python is a programming language used for web development and data science."
     await connector.ingest_bytes(data=content, mime_type="text/plain", source="test://bytes")
 
-    results = await connector.search("python programming", limit=5)
+    t = connector.table
+    results = await connector.client.query(
+        f"SELECT *, search::score(1) AS score FROM {t} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT $limit",
+        {"query": "python programming", "limit": 5},
+    )
     assert len(results) > 0
 
 
@@ -133,7 +148,7 @@ async def test_connector_ingest_directory(server_db: AsyncSurrealConnection, tmp
     await connector.setup_schema()
     await connector.ingest_directory(tmp_path, glob="*.txt")
 
-    all_docs = await connector._client.query("SELECT * FROM documents")
+    all_docs = await connector.client.query("SELECT * FROM documents")
     assert len(all_docs) == 3
 
 
@@ -142,7 +157,7 @@ async def test_connector_document_metadata_stored(server_db: AsyncSurrealConnect
     await connector.setup_schema()
     await connector.ingest_file(sample_text_file)
 
-    docs = await connector._client.query("SELECT * FROM documents")
+    docs = await connector.client.query("SELECT * FROM documents")
     assert len(docs) == 1
     doc = docs[0]
     assert doc["source"] == str(sample_text_file)
@@ -157,8 +172,17 @@ async def test_connector_search_limit_respected(server_db: AsyncSurrealConnectio
     await connector.setup_schema()
     await connector.ingest_directory(ml_corpus, glob="*.txt")
 
-    results_1 = await connector.search("learning", limit=1)
-    results_all = await connector.search("learning", limit=10)
+    t = connector.table
+    results_1 = await connector.client.query(
+        f"SELECT *, search::score(1) AS score FROM {t} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT $limit",
+        {"query": "learning", "limit": 1},
+    )
+    results_all = await connector.client.query(
+        f"SELECT *, search::score(1) AS score FROM {t} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT $limit",
+        {"query": "learning", "limit": 10},
+    )
     assert len(results_1) <= 1
     assert len(results_all) >= len(results_1)
 
@@ -168,26 +192,19 @@ async def test_connector_custom_table_name(server_db: AsyncSurrealConnection, sa
     await connector.setup_schema()
     await connector.ingest_file(sample_text_file)
 
-    docs = await connector._client.query("SELECT * FROM my_docs")
+    docs = await connector.client.query("SELECT * FROM my_docs")
     assert len(docs) == 1
 
-    results = await connector.search("machine learning")
+    t = connector.table
+    results = await connector.client.query(
+        f"SELECT *, search::score(1) AS score FROM {t} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT $limit",
+        {"query": "machine learning", "limit": 10},
+    )
     assert len(results) > 0
 
 
 # --- DocumentPipeline (embed=False) ---
-
-
-async def test_pipeline_full_roundtrip_embed_false(server_db: AsyncSurrealConnection, sample_text_file: Path) -> None:
-    pipeline = DocumentPipeline(db=server_db, embed=False)
-    await pipeline.setup_schema()
-    await pipeline.ingest_file(sample_text_file)
-
-    results = await pipeline.search("machine learning", limit=5)
-    assert len(results) > 0
-
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
-    assert len(chunks) > 0
 
 
 async def test_pipeline_chunks_linked_to_document(server_db: AsyncSurrealConnection, sample_text_file: Path) -> None:
@@ -195,7 +212,7 @@ async def test_pipeline_chunks_linked_to_document(server_db: AsyncSurrealConnect
     await pipeline.setup_schema()
     await pipeline.ingest_file(sample_text_file)
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     assert len(chunks) > 0
     for chunk in chunks:
         assert "document" in chunk
@@ -205,21 +222,12 @@ async def test_pipeline_dedup_skips_chunks(server_db: AsyncSurrealConnection, sa
     pipeline = DocumentPipeline(db=server_db, embed=False)
     await pipeline.setup_schema()
     await pipeline.ingest_file(sample_text_file)
-    first_chunk_count = len(await pipeline._client.query("SELECT * FROM chunks"))
+    first_chunk_count = len(await pipeline.client.query("SELECT * FROM chunks"))
 
     await pipeline.ingest_file(sample_text_file)
-    second_chunk_count = len(await pipeline._client.query("SELECT * FROM chunks"))
+    second_chunk_count = len(await pipeline.client.query("SELECT * FROM chunks"))
 
     assert second_chunk_count == first_chunk_count
-
-
-async def test_pipeline_fulltext_search_on_chunks(server_db: AsyncSurrealConnection, sample_text_file: Path) -> None:
-    pipeline = DocumentPipeline(db=server_db, embed=False)
-    await pipeline.setup_schema()
-    await pipeline.ingest_file(sample_text_file)
-
-    results = await pipeline.fulltext_search("neural networks", limit=5)
-    assert len(results) > 0
 
 
 async def test_pipeline_chunk_metadata_stored(server_db: AsyncSurrealConnection, sample_text_file: Path) -> None:
@@ -227,7 +235,7 @@ async def test_pipeline_chunk_metadata_stored(server_db: AsyncSurrealConnection,
     await pipeline.setup_schema()
     await pipeline.ingest_file(sample_text_file)
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks ORDER BY chunk_index ASC")
+    chunks = await pipeline.client.query("SELECT * FROM chunks ORDER BY chunk_index ASC")
     assert len(chunks) > 0
     for i, chunk in enumerate(chunks):
         assert chunk["chunk_index"] == i
@@ -242,7 +250,7 @@ async def test_pipeline_embed_false_no_embeddings(server_db: AsyncSurrealConnect
     await pipeline.setup_schema()
     await pipeline.ingest_file(sample_text_file)
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     for chunk in chunks:
         assert chunk.get("embedding") is None
 
@@ -252,10 +260,10 @@ async def test_pipeline_ingest_directory(server_db: AsyncSurrealConnection, ml_c
     await pipeline.setup_schema()
     await pipeline.ingest_directory(ml_corpus, glob="*.txt")
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == 3
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     assert len(chunks) >= 3
 
 
@@ -268,7 +276,7 @@ async def test_pipeline_ingest_files(
     await pipeline.setup_schema()
     await pipeline.ingest_files([sample_text_file, second_text_file])
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == 2
 
 
@@ -278,20 +286,9 @@ async def test_pipeline_ingest_bytes(server_db: AsyncSurrealConnection) -> None:
     content = b"Kubernetes orchestrates containerized applications across clusters of machines."
     await pipeline.ingest_bytes(data=content, mime_type="text/plain", source="test://k8s")
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == 1
     assert docs[0]["source"] == "test://k8s"
-
-
-async def test_pipeline_search_limit_respected(server_db: AsyncSurrealConnection, ml_corpus: Path) -> None:
-    pipeline = DocumentPipeline(db=server_db, embed=False)
-    await pipeline.setup_schema()
-    await pipeline.ingest_directory(ml_corpus, glob="*.txt")
-
-    results_1 = await pipeline.search("learning", limit=1)
-    results_all = await pipeline.search("learning", limit=50)
-    assert len(results_1) <= 1
-    assert len(results_all) >= len(results_1)
 
 
 async def test_pipeline_custom_table_names(server_db: AsyncSurrealConnection, sample_text_file: Path) -> None:
@@ -299,21 +296,19 @@ async def test_pipeline_custom_table_names(server_db: AsyncSurrealConnection, sa
     await pipeline.setup_schema()
     await pipeline.ingest_file(sample_text_file)
 
-    docs = await pipeline._client.query("SELECT * FROM my_docs")
+    docs = await pipeline.client.query("SELECT * FROM my_docs")
     assert len(docs) == 1
 
-    chunks = await pipeline._client.query("SELECT * FROM my_chunks")
+    chunks = await pipeline.client.query("SELECT * FROM my_chunks")
     assert len(chunks) > 0
 
-    results = await pipeline.search("machine learning")
+    ct = pipeline.chunk_table
+    results = await pipeline.client.query(
+        f"SELECT *, search::score(1) AS score FROM {ct} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT $limit",
+        {"query": "machine learning", "limit": 10},
+    )
     assert len(results) > 0
-
-
-async def test_pipeline_vector_search_raises_when_embed_false(server_db: AsyncSurrealConnection) -> None:
-    pipeline = DocumentPipeline(db=server_db, embed=False)
-    await pipeline.setup_schema()
-    with pytest.raises(ValueError, match="embed=True"):
-        await pipeline.vector_search("test query")
 
 
 # --- DocumentPipeline (embed=True) ---
@@ -328,7 +323,7 @@ async def test_pipeline_embed_true_ingest_and_chunks_have_embeddings(
     await pipeline.setup_schema()
     await pipeline.ingest_file(sample_text_file)
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     assert len(chunks) > 0
     for chunk in chunks:
         assert chunk.get("embedding") is not None
@@ -340,10 +335,10 @@ async def test_pipeline_embed_true_dedup(server_db: AsyncSurrealConnection, samp
     pipeline = DocumentPipeline(db=server_db, embed=True)
     await pipeline.setup_schema()
     await pipeline.ingest_file(sample_text_file)
-    first_count = len(await pipeline._client.query("SELECT * FROM chunks"))
+    first_count = len(await pipeline.client.query("SELECT * FROM chunks"))
 
     await pipeline.ingest_file(sample_text_file)
-    second_count = len(await pipeline._client.query("SELECT * FROM chunks"))
+    second_count = len(await pipeline.client.query("SELECT * FROM chunks"))
 
     assert second_count == first_count
 
@@ -360,9 +355,8 @@ async def test_pipeline_fast_preset_embeddings(sample_text_file: Path) -> None:
     from unittest.mock import AsyncMock
 
     from kreuzberg import extract_file
-    from surrealdb import AsyncWsSurrealConnection
 
-    dummy_client = AsyncMock(spec=AsyncWsSurrealConnection)
+    dummy_client = AsyncMock(spec=AsyncSurrealConnection)
     pipeline = DocumentPipeline(
         db=dummy_client,
         embed=True,
@@ -375,70 +369,75 @@ async def test_pipeline_fast_preset_embeddings(sample_text_file: Path) -> None:
         assert len(chunk.embedding) == 384
 
 
-async def test_pipeline_embed_true_fulltext_search_still_works(
-    server_db: AsyncSurrealConnection,
-    sample_text_file: Path,
-) -> None:
-    """Even with embed=True, BM25 fulltext search on chunks should work."""
-    pipeline = DocumentPipeline(db=server_db, embed=True)
-    await pipeline.setup_schema()
-    await pipeline.ingest_file(sample_text_file)
-
-    results = await pipeline.fulltext_search("neural networks", limit=5)
-    assert len(results) > 0
-
-
 async def test_pipeline_embed_true_multiple_docs_ingested(server_db: AsyncSurrealConnection, ml_corpus: Path) -> None:
     pipeline = DocumentPipeline(db=server_db, embed=True)
     await pipeline.setup_schema()
     await pipeline.ingest_directory(ml_corpus, glob="*.txt")
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == 3
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     assert len(chunks) >= 3
     for chunk in chunks:
         assert chunk.get("embedding") is not None
         assert len(chunk["embedding"]) == 768
 
 
-# --- Hybrid search and vector search ---
+# --- Raw SurQL search via client ---
 
 
-async def test_pipeline_hybrid_search(server_db: AsyncSurrealConnection, sample_text_file: Path) -> None:
+async def test_pipeline_bm25_via_client(server_db: AsyncSurrealConnection, sample_text_file: Path) -> None:
+    """BM25 fulltext search on chunks via pipeline.client."""
+    pipeline = DocumentPipeline(db=server_db, embed=False)
+    await pipeline.setup_schema()
+    await pipeline.ingest_file(sample_text_file)
+
+    ct = pipeline.chunk_table
+    results = await pipeline.client.query(
+        f"SELECT *, search::score(1) AS score FROM {ct} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT $limit",
+        {"query": "machine learning", "limit": 5},
+    )
+    assert len(results) > 0
+
+
+async def test_pipeline_vector_search_via_client(
+    server_db: AsyncSurrealConnection, sample_text_file: Path
+) -> None:
+    """Vector KNN search on chunks via pipeline.client + pipeline.embed_query()."""
     pipeline = DocumentPipeline(db=server_db, embed=True)
     await pipeline.setup_schema()
     await pipeline.ingest_file(sample_text_file)
 
-    results = await pipeline.search("machine learning algorithms", limit=5)
+    embedding = await pipeline.embed_query("artificial intelligence")
+    ct = pipeline.chunk_table
+    results = await pipeline.client.query(
+        f"SELECT *, vector::distance::knn() AS distance FROM {ct} "
+        f"WHERE embedding <|5,COSINE|> $embedding ORDER BY distance",
+        {"embedding": embedding},
+    )
     assert len(results) > 0
 
 
-async def test_pipeline_vector_search(server_db: AsyncSurrealConnection, sample_text_file: Path) -> None:
+async def test_pipeline_hybrid_rrf_via_client(
+    server_db: AsyncSurrealConnection, sample_text_file: Path
+) -> None:
+    """Hybrid RRF search on chunks via pipeline.client + pipeline.embed_query()."""
     pipeline = DocumentPipeline(db=server_db, embed=True)
     await pipeline.setup_schema()
     await pipeline.ingest_file(sample_text_file)
 
-    results = await pipeline.vector_search("artificial intelligence", limit=5)
-    assert len(results) > 0
-
-
-async def test_pipeline_hybrid_search_multiple_docs(server_db: AsyncSurrealConnection, ml_corpus: Path) -> None:
-    pipeline = DocumentPipeline(db=server_db, embed=True)
-    await pipeline.setup_schema()
-    await pipeline.ingest_directory(ml_corpus, glob="*.txt")
-
-    results = await pipeline.search("transformer attention mechanism", limit=5)
-    assert len(results) > 0
-
-
-async def test_pipeline_vector_search_multiple_docs(server_db: AsyncSurrealConnection, ml_corpus: Path) -> None:
-    pipeline = DocumentPipeline(db=server_db, embed=True)
-    await pipeline.setup_schema()
-    await pipeline.ingest_directory(ml_corpus, glob="*.txt")
-
-    results = await pipeline.vector_search("reinforcement learning reward", limit=5)
+    embedding = await pipeline.embed_query("machine learning algorithms")
+    ct = pipeline.chunk_table
+    results = await pipeline.client.query(
+        f"SELECT * FROM search::rrf(["
+        f"(SELECT id, content FROM {ct} WHERE embedding <|5,COSINE|> $embedding),"
+        f"(SELECT id, content, search::score(1) AS score FROM {ct} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT 5)"
+        f"], 5, 60);",
+        {"embedding": embedding, "query": "machine learning algorithms"},
+    )
     assert len(results) > 0
 
 
@@ -452,9 +451,8 @@ async def test_pipeline_fast_preset_vector_search() -> None:
     from unittest.mock import AsyncMock
 
     from kreuzberg import extract_bytes
-    from surrealdb import AsyncWsSurrealConnection
 
-    dummy_client = AsyncMock(spec=AsyncWsSurrealConnection)
+    dummy_client = AsyncMock(spec=AsyncSurrealConnection)
     pipeline = DocumentPipeline(
         db=dummy_client,
         embed=True,
@@ -501,7 +499,7 @@ async def test_connector_ingest_file_fixture(server_db: AsyncSurrealConnection, 
     await connector.setup_schema()
     await connector.ingest_file(path)
 
-    docs = await connector._client.query("SELECT * FROM documents")
+    docs = await connector.client.query("SELECT * FROM documents")
     assert len(docs) == 1
     assert docs[0]["source"] == str(path)
     assert len(docs[0]["content"]) > 0
@@ -520,7 +518,7 @@ async def test_connector_ingest_bytes_fixture(server_db: AsyncSurrealConnection,
     await connector.setup_schema()
     await connector.ingest_bytes(data=data, mime_type=_mime_for(path), source=f"fixture://{fmt}")
 
-    docs = await connector._client.query("SELECT * FROM documents")
+    docs = await connector.client.query("SELECT * FROM documents")
     assert len(docs) == 1
     assert docs[0]["source"] == f"fixture://{fmt}"
     assert len(docs[0]["content"]) > 0
@@ -535,7 +533,7 @@ async def test_connector_ingest_files_all_fixtures(server_db: AsyncSurrealConnec
     await connector.setup_schema()
     await connector.ingest_files(paths)
 
-    docs = await connector._client.query("SELECT * FROM documents")
+    docs = await connector.client.query("SELECT * FROM documents")
     assert len(docs) == len(paths)
 
 
@@ -547,7 +545,7 @@ async def test_connector_ingest_directory_fixtures(server_db: AsyncSurrealConnec
     await connector.setup_schema()
     await connector.ingest_directory(FIXTURES_DIR, glob="*.*")
 
-    docs = await connector._client.query("SELECT * FROM documents")
+    docs = await connector.client.query("SELECT * FROM documents")
     assert len(docs) == 4
 
 
@@ -559,7 +557,12 @@ async def test_connector_search_fixture_content(server_db: AsyncSurrealConnectio
     await connector.setup_schema()
     await connector.ingest_directory(FIXTURES_DIR, glob="*.*")
 
-    results = await connector.search("sample document testing", limit=10)
+    t = connector.table
+    results = await connector.client.query(
+        f"SELECT *, search::score(1) AS score FROM {t} "
+        f"WHERE content @1@ $query ORDER BY score DESC LIMIT $limit",
+        {"query": "sample document testing", "limit": 10},
+    )
     assert len(results) > 0
 
 
@@ -573,11 +576,11 @@ async def test_pipeline_ingest_file_fixture_embed_false(server_db: AsyncSurrealC
     await pipeline.setup_schema()
     await pipeline.ingest_file(path)
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == 1
     assert docs[0]["source"] == str(path)
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks ORDER BY chunk_index ASC")
+    chunks = await pipeline.client.query("SELECT * FROM chunks ORDER BY chunk_index ASC")
     assert len(chunks) > 0
     for i, chunk in enumerate(chunks):
         assert chunk["chunk_index"] == i
@@ -597,11 +600,11 @@ async def test_pipeline_ingest_bytes_fixture_embed_false(server_db: AsyncSurreal
     await pipeline.setup_schema()
     await pipeline.ingest_bytes(data=data, mime_type=_mime_for(path), source=f"fixture://{fmt}")
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == 1
     assert docs[0]["source"] == f"fixture://{fmt}"
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     assert len(chunks) > 0
 
 
@@ -614,10 +617,10 @@ async def test_pipeline_ingest_files_all_fixtures_embed_false(server_db: AsyncSu
     await pipeline.setup_schema()
     await pipeline.ingest_files(paths)
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == len(paths)
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     assert len(chunks) >= len(paths)
 
 
@@ -626,23 +629,11 @@ async def test_pipeline_ingest_directory_fixtures_embed_false(server_db: AsyncSu
     await pipeline.setup_schema()
     await pipeline.ingest_directory(FIXTURES_DIR, glob="*.*")
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == 4
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     assert len(chunks) >= 4
-
-
-# --- DocumentPipeline (embed=False): search over fixture content ---
-
-
-async def test_pipeline_search_fixture_content_embed_false(server_db: AsyncSurrealConnection) -> None:
-    pipeline = DocumentPipeline(db=server_db, embed=False)
-    await pipeline.setup_schema()
-    await pipeline.ingest_directory(FIXTURES_DIR, glob="*.*")
-
-    results = await pipeline.search("sample document", limit=10)
-    assert len(results) > 0
 
 
 # --- DocumentPipeline (embed=True): file path ingestion ---
@@ -655,10 +646,10 @@ async def test_pipeline_ingest_file_fixture_embed_true(server_db: AsyncSurrealCo
     await pipeline.setup_schema()
     await pipeline.ingest_file(path)
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == 1
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     assert len(chunks) > 0
     for chunk in chunks:
         assert chunk.get("embedding") is not None
@@ -677,10 +668,10 @@ async def test_pipeline_ingest_bytes_fixture_embed_true(server_db: AsyncSurrealC
     await pipeline.setup_schema()
     await pipeline.ingest_bytes(data=data, mime_type=_mime_for(path), source=f"fixture://{fmt}")
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == 1
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     assert len(chunks) > 0
     for chunk in chunks:
         assert chunk.get("embedding") is not None
@@ -695,10 +686,10 @@ async def test_pipeline_ingest_all_fixtures_embed_true(server_db: AsyncSurrealCo
     await pipeline.setup_schema()
     await pipeline.ingest_directory(FIXTURES_DIR, glob="*.*")
 
-    docs = await pipeline._client.query("SELECT * FROM documents")
+    docs = await pipeline.client.query("SELECT * FROM documents")
     assert len(docs) == 4
 
-    chunks = await pipeline._client.query("SELECT * FROM chunks")
+    chunks = await pipeline.client.query("SELECT * FROM chunks")
     assert len(chunks) >= 4
     for chunk in chunks:
         assert chunk.get("embedding") is not None
