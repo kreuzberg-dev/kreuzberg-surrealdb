@@ -1,5 +1,7 @@
 """Chunked extraction with optional embedding for RAG pipelines."""
 
+from typing import TYPE_CHECKING
+
 from kreuzberg import (
     ChunkingConfig,
     EmbeddingConfig,
@@ -9,7 +11,7 @@ from kreuzberg import (
     extract_bytes,
     get_embedding_preset,
 )
-from surrealdb import RecordID, Value
+from surrealdb import RecordID
 
 from kreuzberg_surrealdb._base import (
     AsyncSurrealQueryable,
@@ -19,6 +21,9 @@ from kreuzberg_surrealdb._base import (
     _map_result_to_doc,
 )
 from kreuzberg_surrealdb.schema import build_pipeline_schema
+
+if TYPE_CHECKING:
+    from kreuzberg_surrealdb.types import ChunkRecord
 
 
 class DocumentPipeline(BaseIngester):
@@ -175,22 +180,22 @@ class DocumentPipeline(BaseIngester):
         )
         _check_insert_result(res, context="document insertion")
 
-        chunk_records: list[dict[str, Value]] = []
+        chunk_records: list[ChunkRecord] = []
         for i, chunk in enumerate(result.chunks):
-            chunk_rec: dict[str, Value] = {
+            meta = chunk.metadata or {}
+            chunk_rec: ChunkRecord = {
                 "id": RecordID(self._chunk_table, f"{content_hash}_{i}"),
                 "document": doc_id,
                 "content": chunk.content,
                 "chunk_index": i,
                 "embedding": chunk.embedding if self._embed else None,
                 "word_count": len(chunk.content.split()),
+                "page_number": meta.get("page_number"),
+                "char_start": meta.get("char_start"),
+                "char_end": meta.get("char_end"),
+                "first_page": meta.get("first_page"),
+                "last_page": meta.get("last_page"),
             }
-            if chunk.metadata:
-                chunk_rec["page_number"] = chunk.metadata.get("page_number")
-                chunk_rec["char_start"] = chunk.metadata.get("char_start")
-                chunk_rec["char_end"] = chunk.metadata.get("char_end")
-                chunk_rec["first_page"] = chunk.metadata.get("first_page")
-                chunk_rec["last_page"] = chunk.metadata.get("last_page")
             chunk_records.append(chunk_rec)
 
         ct = self._chunk_table

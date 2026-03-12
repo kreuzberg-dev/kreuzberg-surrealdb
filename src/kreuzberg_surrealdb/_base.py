@@ -11,6 +11,7 @@ from kreuzberg import ExtractionConfig, ExtractionResult, extract_bytes, extract
 from surrealdb import RecordID, Value
 
 from kreuzberg_surrealdb.exceptions import DimensionMismatchError, IngestionError
+from kreuzberg_surrealdb.types import DocumentRecord
 
 
 @runtime_checkable
@@ -54,7 +55,7 @@ def _parse_datetime(value: Any) -> datetime | None:
     return None
 
 
-def _map_result_to_doc(result: ExtractionResult, source: str, table: str) -> dict[str, Value]:
+def _map_result_to_doc(result: ExtractionResult, source: str, table: str) -> DocumentRecord:
     """Map an ExtractionResult to a SurrealDB document record.
 
     Args:
@@ -169,7 +170,7 @@ class BaseIngester(ABC):
         """The documents table name."""
         return self._table
 
-    async def _insert_documents(self, records: list[dict[str, Value]]) -> list[Value]:
+    async def _insert_documents(self, records: list[DocumentRecord]) -> list[Value]:
         """Insert documents with dedup via INSERT IGNORE.
 
         Args:
