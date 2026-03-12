@@ -10,6 +10,8 @@ from typing import Any, Protocol, runtime_checkable
 from kreuzberg import ExtractionConfig, ExtractionResult, extract_bytes, extract_file
 from surrealdb import RecordID, Value
 
+from kreuzberg_surrealdb.exceptions import DimensionMismatchError, IngestionError
+
 
 @runtime_checkable
 class AsyncSurrealQueryable(Protocol):
@@ -20,7 +22,7 @@ class AsyncSurrealQueryable(Protocol):
     and sessions returned by the AsyncSurreal factory.
     """
 
-    async def query(self, query: str, vars: dict[str, Value] | None = None) -> Value: ...
+    async def query(self, query: str, vars: dict[str, Value] | None = None) -> Value: ...  # noqa: A002
 
 
 def _content_hash(content: str) -> str:
@@ -95,7 +97,8 @@ def _check_insert_result(result: Value, *, context: str) -> None:
             in error messages.
 
     Raises:
-        RuntimeError: If the result list contains error strings.
+        DimensionMismatchError: If the error indicates a vector dimension conflict.
+        IngestionError: If the result list contains other error strings.
 
     """
     if not isinstance(result, list):
@@ -106,18 +109,9 @@ def _check_insert_result(result: Value, *, context: str) -> None:
 
     dim_errors = [e for e in errors if "dimension" in e.lower()]
     if dim_errors:
-        msg = (
-            f"Vector dimension mismatch during {context}. "
-            "SurrealDB v3 enforces HNSW dimensions server-globally — "
-            "once an index with dimension N exists anywhere on the server, "
-            "inserts with a different dimension fail even across namespaces and databases. "
-            "Use the same embedding model for all pipelines on the same server, "
-            f"or use separate SurrealDB instances. Server error: {dim_errors[0]}"
-        )
-        raise RuntimeError(msg)
+        raise DimensionMismatchError(context, dim_errors[0])
 
-    msg = f"INSERT IGNORE failed silently during {context}: {errors[0]}"
-    raise RuntimeError(msg)
+    raise IngestionError(context, errors[0])
 
 
 def _collect_files(directory: str | Path, glob: str) -> list[Path]:
@@ -131,7 +125,8 @@ def _collect_files(directory: str | Path, glob: str) -> list[Path]:
         Sorted list of matching file paths.
 
     """
-    return sorted(p for p in Path(directory).glob(glob) if p.is_file())
+    root = Path(directory).resolve()
+    return sorted(p for p in root.glob(glob) if p.is_file() and p.resolve().is_relative_to(root))
 
 
 class BaseIngester(ABC):

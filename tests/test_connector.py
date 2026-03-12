@@ -7,6 +7,7 @@ import pytest
 from kreuzberg import ExtractionConfig
 
 from kreuzberg_surrealdb.connector import DocumentConnector
+from kreuzberg_surrealdb.exceptions import IngestionError
 
 
 def test_analyzer_name(mock_client: AsyncMock) -> None:
@@ -127,5 +128,5 @@ async def test_connector_raises_on_silent_insert_error(
 
     connector = DocumentConnector(db=mock_client)
 
-    with pytest.raises(RuntimeError, match="INSERT IGNORE failed silently"):
+    with pytest.raises(IngestionError, match="INSERT IGNORE failed silently"):
         await connector.ingest_file("/tmp/test.pdf")

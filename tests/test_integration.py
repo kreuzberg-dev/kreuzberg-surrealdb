@@ -244,8 +244,8 @@ async def test_pipeline_chunk_metadata_stored(server_db: AsyncSurrealQueryable, 
         assert chunk["chunk_index"] == i
         assert "content" in chunk
         assert len(chunk["content"]) > 0
-        assert chunk.get("token_count") is not None
-        assert chunk["token_count"] > 0
+        assert chunk.get("word_count") is not None
+        assert chunk["word_count"] > 0
 
 
 async def test_pipeline_embed_false_no_embeddings(server_db: AsyncSurrealQueryable, sample_text_file: Path) -> None:

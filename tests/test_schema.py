@@ -106,7 +106,7 @@ def test_pipeline_schema_chunk_fields() -> None:
         "page_number",
         "char_start",
         "char_end",
-        "token_count",
+        "word_count",
         "first_page",
         "last_page",
     ]:

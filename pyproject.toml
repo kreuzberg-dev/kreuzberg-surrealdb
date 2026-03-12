@@ -6,8 +6,8 @@ requires = [ "hatchling" ]
 name = "kreuzberg-surrealdb"
 version = "0.1.0"
 description = """\
-  Kreuzberg-to-SurrealDB connector — zero-dependency RAG pipeline with local embeddings, hybrid search, and graph \
-  storage\
+  Kreuzberg-to-SurrealDB connector for document ingestion pipelines — schema management, content deduplication, \
+  chunk storage, and index configuration\
   """
 readme = "README.md"
 keywords = [
@@ -31,7 +31,7 @@ license = "MIT"
 authors = [ { name = "Kreuzberg.dev", email = "admin@kreuzberg.dev" } ]
 requires-python = ">=3.10"
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
@@ -84,7 +84,7 @@ build.targets.wheel.packages = [ "src/kreuzberg_surrealdb" ]
 target-version = "py310"
 line-length = 120
 lint.select = [ "ALL" ]
-lint.ignore = [ "ANN401", "COM812", "D100", "D104", "D203", "D213", "ISC001", "PLR0913" ]
+lint.ignore = [ "ANN401", "COM812", "D100", "D104", "D107", "D203", "D213", "ISC001", "PLR0913" ]
 lint.per-file-ignores."examples/**" = [
   "ANN",
   "ASYNC240",

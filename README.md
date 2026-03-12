@@ -367,7 +367,7 @@ erDiagram
         string content "BM25 FULLTEXT"
         int chunk_index
         array embedding "optional, HNSW vector index"
-        int token_count "optional"
+        int word_count "optional"
         int page_number "optional"
         int char_start "optional"
         int char_end "optional"

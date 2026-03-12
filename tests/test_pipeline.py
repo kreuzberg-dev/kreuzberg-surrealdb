@@ -9,6 +9,7 @@ from kreuzberg import Chunk, ExtractionResult
 from surrealdb import RecordID
 
 from kreuzberg_surrealdb._base import _check_insert_result
+from kreuzberg_surrealdb.exceptions import DimensionMismatchError, IngestionError
 from kreuzberg_surrealdb.pipeline import DocumentPipeline
 
 
@@ -187,7 +188,7 @@ async def test_pipeline_chunk_metadata_extracted(
     assert first_chunk["char_end"] == 100
     assert first_chunk["first_page"] == 1
     assert first_chunk["last_page"] == 1
-    assert "token_count" in first_chunk
+    assert "word_count" in first_chunk
 
 
 @patch("kreuzberg_surrealdb._base.extract_bytes")
@@ -285,13 +286,13 @@ def test_check_insert_result_passes_on_normal_results() -> None:
 
 def test_check_insert_result_raises_on_dimension_error() -> None:
     result = ["Expected a vector of 768 dimensions, but got 384"]
-    with pytest.raises(RuntimeError, match="Vector dimension mismatch"):
+    with pytest.raises(DimensionMismatchError, match="Vector dimension mismatch"):
         _check_insert_result(result, context="chunk insertion")
 
 
 def test_check_insert_result_raises_on_generic_string_error() -> None:
     result = ["Some unexpected SurrealDB error"]
-    with pytest.raises(RuntimeError, match="INSERT IGNORE failed silently"):
+    with pytest.raises(IngestionError, match="INSERT IGNORE failed silently"):
         _check_insert_result(result, context="test")
 
 
@@ -314,7 +315,7 @@ async def test_pipeline_raises_on_chunk_dimension_mismatch(
 
     pipeline = DocumentPipeline(db=mock_client)
 
-    with pytest.raises(RuntimeError, match="Vector dimension mismatch during chunk insertion"):
+    with pytest.raises(DimensionMismatchError, match="Vector dimension mismatch during chunk insertion"):
         await pipeline.ingest_file("/tmp/test.pdf")
 
 

@@ -97,7 +97,7 @@ def _build_chunk_schema(chunk_table: str, table: str) -> list[str]:
         f"DEFINE FIELD IF NOT EXISTS page_number ON TABLE {chunk_table} TYPE option<int>;",
         f"DEFINE FIELD IF NOT EXISTS char_start ON TABLE {chunk_table} TYPE option<int>;",
         f"DEFINE FIELD IF NOT EXISTS char_end ON TABLE {chunk_table} TYPE option<int>;",
-        f"DEFINE FIELD IF NOT EXISTS token_count ON TABLE {chunk_table} TYPE option<int>;",
+        f"DEFINE FIELD IF NOT EXISTS word_count ON TABLE {chunk_table} TYPE option<int>;",
         f"DEFINE FIELD IF NOT EXISTS first_page ON TABLE {chunk_table} TYPE option<int>;",
         f"DEFINE FIELD IF NOT EXISTS last_page ON TABLE {chunk_table} TYPE option<int>;",
     ]

@@ -183,7 +183,7 @@ class DocumentPipeline(BaseIngester):
                 "content": chunk.content,
                 "chunk_index": i,
                 "embedding": chunk.embedding if self._embed else None,
-                "token_count": len(chunk.content.split()),
+                "word_count": len(chunk.content.split()),
             }
             if chunk.metadata:
                 chunk_rec["page_number"] = chunk.metadata.get("page_number")
