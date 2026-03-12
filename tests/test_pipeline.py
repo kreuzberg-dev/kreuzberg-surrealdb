@@ -111,9 +111,43 @@ def test_pipeline_preserves_user_chunking_params_embed_false(mock_client: AsyncM
     assert pipeline._config.chunking.embedding is None
 
 
+@patch("kreuzberg_surrealdb.pipeline.build_pipeline_schema")
+async def test_pipeline_setup_schema_forwards_params(
+    mock_build: MagicMock,
+    mock_client: AsyncMock,
+) -> None:
+    """setup_schema() passes constructor and method parameters to build_pipeline_schema."""
+    mock_build.return_value = ["STMT1;", "STMT2;", "STMT3;"]
+    pipeline = DocumentPipeline(db=mock_client, chunk_table="my_chunks", embedding_model="fast")
+
+    await pipeline.setup_schema(
+        analyzer_language="german",
+        bm25_k1=1.5,
+        bm25_b=0.8,
+        distance_metric="EUCLIDEAN",
+        hnsw_efc=200,
+        hnsw_m=16,
+    )
+
+    mock_build.assert_called_once_with(
+        table="documents",
+        chunk_table="my_chunks",
+        embed=True,
+        embedding_dimension=384,
+        analyzer_language="german",
+        bm25_k1=1.5,
+        bm25_b=0.8,
+        distance_metric="EUCLIDEAN",
+        hnsw_efc=200,
+        hnsw_m=16,
+    )
+    assert mock_client.query.call_count == 3
+
+
 @patch("kreuzberg_surrealdb._base.extract_file")
 async def test_pipeline_chunk_without_metadata(
     mock_extract: MagicMock,
+    pipeline: DocumentPipeline,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
 ) -> None:
@@ -125,9 +159,6 @@ async def test_pipeline_chunk_without_metadata(
 
     sample_extraction_result.chunks = [chunk]
     mock_extract.return_value = sample_extraction_result
-
-    pipeline = DocumentPipeline(db=mock_client)
-    pipeline._schema_ready = True
 
     await pipeline.ingest_file("/tmp/test.pdf")
 
@@ -146,14 +177,12 @@ async def test_pipeline_chunk_without_metadata(
 @patch("kreuzberg_surrealdb._base.extract_file")
 async def test_pipeline_ingest_file_no_chunks_skips_chunk_insert(
     mock_extract: MagicMock,
+    pipeline: DocumentPipeline,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
 ) -> None:
     sample_extraction_result.chunks = []
     mock_extract.return_value = sample_extraction_result
-
-    pipeline = DocumentPipeline(db=mock_client)
-    pipeline._schema_ready = True
 
     await pipeline.ingest_file("/tmp/test.pdf")
 
@@ -173,7 +202,8 @@ async def test_pipeline_chunk_batch_splitting(
     mock_extract.return_value = sample_extraction_result
 
     pipeline = DocumentPipeline(db=mock_client, insert_batch_size=2)
-    pipeline._schema_ready = True
+    await pipeline.setup_schema()
+    mock_client.query.reset_mock()
 
     await pipeline.ingest_file("/tmp/test.pdf")
 
@@ -205,22 +235,19 @@ def test_check_insert_result_raises_on_generic_string_error() -> None:
 @patch("kreuzberg_surrealdb._base.extract_file")
 async def test_pipeline_raises_on_chunk_dimension_mismatch(
     mock_extract: MagicMock,
+    pipeline: DocumentPipeline,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
     sample_chunks: list[MagicMock],
 ) -> None:
     sample_extraction_result.chunks = sample_chunks
     mock_extract.return_value = sample_extraction_result
-
     mock_client.query = AsyncMock(
         side_effect=[
             [],
             ["Expected a vector of 768 dimensions, but got 384"],
         ]
     )
-
-    pipeline = DocumentPipeline(db=mock_client)
-    pipeline._schema_ready = True
 
     with pytest.raises(DimensionMismatchError, match="Vector dimension mismatch during chunk insertion"):
         await pipeline.ingest_file("/tmp/test.pdf")
@@ -252,32 +279,21 @@ async def test_embed_query_raises_on_none_embedding(mock_extract: MagicMock, moc
         await pipeline.embed_query("test query")
 
 
-async def test_fast_preset_produces_384_dim_embeddings(mock_client: AsyncMock, tmp_path: Path) -> None:
-    """Verify the 'fast' preset produces 384-dim embeddings via real kreuzberg extraction."""
-    from kreuzberg import extract_file
+@patch("kreuzberg_surrealdb.pipeline.extract_bytes")
+async def test_embed_query_returns_embedding(mock_extract: MagicMock, mock_client: AsyncMock) -> None:
+    """embed_query() success path returns the embedding vector from the first chunk."""
+    expected = [0.1, 0.2, 0.3]
+    mock_chunk = MagicMock(spec=Chunk)
+    mock_chunk.embedding = expected
+    mock_result = MagicMock(spec=ExtractionResult)
+    mock_result.chunks = [mock_chunk]
+    mock_extract.return_value = mock_result
 
-    sample = tmp_path / "sample.txt"
-    sample.write_text("Machine learning is a subset of artificial intelligence.")
+    pipeline = DocumentPipeline(db=mock_client, embed=True)
+    result = await pipeline.embed_query("test query")
 
-    pipeline = DocumentPipeline(db=mock_client, embed=True, embedding_model="fast")
-    result = await extract_file(str(sample), config=pipeline._config)
-
-    assert len(result.chunks) > 0
-    for chunk in result.chunks:
-        assert chunk.embedding is not None
-        assert len(chunk.embedding) == 384
-
-
-async def test_fast_preset_embed_query_produces_384_dim(mock_client: AsyncMock) -> None:
-    """Verify the 'fast' preset can embed a query string with correct dimensions."""
-    from kreuzberg import extract_bytes
-
-    pipeline = DocumentPipeline(db=mock_client, embed=True, embedding_model="fast")
-    result = await extract_bytes(b"machine learning", "text/plain", config=pipeline._config)
-
-    assert len(result.chunks) > 0
-    assert result.chunks[0].embedding is not None
-    assert len(result.chunks[0].embedding) == 384
+    assert result == expected
+    mock_extract.assert_called_once_with(b"test query", "text/plain", config=pipeline._config)
 
 
 @pytest.mark.parametrize(

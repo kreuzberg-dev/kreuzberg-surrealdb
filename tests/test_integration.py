@@ -11,6 +11,7 @@ import os
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from surrealdb import AsyncSurreal
@@ -404,6 +405,36 @@ async def test_pipeline_hybrid_rrf_via_client(server_db: AsyncSurrealQueryable, 
         {"embedding": embedding, "query": "machine learning algorithms"},
     )
     assert len(results) > 0
+
+
+async def test_fast_preset_produces_384_dim_embeddings(tmp_path: Path) -> None:
+    """Verify the 'fast' preset produces 384-dim embeddings via real kreuzberg extraction."""
+    from kreuzberg import extract_file
+
+    mock_client = AsyncMock(spec=AsyncSurrealQueryable)
+    sample = tmp_path / "sample.txt"
+    sample.write_text("Machine learning is a subset of artificial intelligence.")
+
+    pipeline = DocumentPipeline(db=mock_client, embed=True, embedding_model="fast")
+    result = await extract_file(str(sample), config=pipeline._config)
+
+    assert len(result.chunks) > 0
+    for chunk in result.chunks:
+        assert chunk.embedding is not None
+        assert len(chunk.embedding) == 384
+
+
+async def test_fast_preset_embed_query_produces_384_dim() -> None:
+    """Verify the 'fast' preset can embed a query string with correct dimensions."""
+    from kreuzberg import extract_bytes
+
+    mock_client = AsyncMock(spec=AsyncSurrealQueryable)
+    pipeline = DocumentPipeline(db=mock_client, embed=True, embedding_model="fast")
+    result = await extract_bytes(b"machine learning", "text/plain", config=pipeline._config)
+
+    assert len(result.chunks) > 0
+    assert result.chunks[0].embedding is not None
+    assert len(result.chunks[0].embedding) == 384
 
 
 FIXTURE_FILES = {

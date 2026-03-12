@@ -7,6 +7,8 @@ import pytest
 from kreuzberg import Chunk, ExtractionResult
 
 from kreuzberg_surrealdb import AsyncSurrealQueryable
+from kreuzberg_surrealdb.connector import DocumentConnector
+from kreuzberg_surrealdb.pipeline import DocumentPipeline
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -50,3 +52,21 @@ def sample_chunks() -> list[MagicMock]:
         }
         chunks.append(chunk)
     return chunks
+
+
+@pytest.fixture
+async def connector(mock_client: AsyncMock) -> DocumentConnector:
+    """DocumentConnector with schema initialized and mock query reset."""
+    conn = DocumentConnector(db=mock_client)
+    await conn.setup_schema()
+    mock_client.query.reset_mock()
+    return conn
+
+
+@pytest.fixture
+async def pipeline(mock_client: AsyncMock) -> DocumentPipeline:
+    """DocumentPipeline with schema initialized and mock query reset."""
+    pipe = DocumentPipeline(db=mock_client)
+    await pipe.setup_schema()
+    mock_client.query.reset_mock()
+    return pipe
