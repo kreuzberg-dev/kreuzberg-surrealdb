@@ -139,7 +139,7 @@ async def test_connector_raises_on_silent_insert_error(
 
 
 @pytest.mark.parametrize(
-    "method,args,kwargs",
+    ("method", "args", "kwargs"),
     [
         ("ingest_file", ["/tmp/test.pdf"], {}),
         ("ingest_files", [["/tmp/a.pdf", "/tmp/b.pdf"]], {}),
@@ -151,8 +151,8 @@ async def test_connector_raises_on_silent_insert_error(
 async def test_connector_raises_without_schema(
     mock_client: AsyncMock,
     method: str,
-    args: list,
-    kwargs: dict,
+    args: list[object],
+    kwargs: dict[str, object],
 ) -> None:
     connector = DocumentConnector(db=mock_client)
 

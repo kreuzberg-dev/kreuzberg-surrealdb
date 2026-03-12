@@ -5,9 +5,7 @@ class SchemaNotInitializedError(RuntimeError):
     """Raised when ingestion is attempted before calling setup_schema()."""
 
     def __init__(self) -> None:
-        super().__init__(
-            "Schema not initialized. Call setup_schema() before ingesting documents."
-        )
+        super().__init__("Schema not initialized. Call setup_schema() before ingesting documents.")
 
 
 class IngestionError(RuntimeError):
