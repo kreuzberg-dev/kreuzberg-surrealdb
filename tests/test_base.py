@@ -51,35 +51,35 @@ def test_parse_datetime_non_string_non_datetime_returns_none() -> None:
     assert _parse_datetime(12345) is None
 
 
-def test_collect_files_finds_matching_files(tmp_path: Path) -> None:
+async def test_collect_files_finds_matching_files(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("a")
     (tmp_path / "b.txt").write_text("b")
     (tmp_path / "c.md").write_text("c")
 
-    result = _collect_files(tmp_path, "*.txt")
+    result = await _collect_files(tmp_path, "*.txt")
     assert len(result) == 2
     assert all(p.suffix == ".txt" for p in result)
 
 
-def test_collect_files_returns_sorted(tmp_path: Path) -> None:
+async def test_collect_files_returns_sorted(tmp_path: Path) -> None:
     (tmp_path / "z.txt").write_text("z")
     (tmp_path / "a.txt").write_text("a")
 
-    result = _collect_files(tmp_path, "*.txt")
+    result = await _collect_files(tmp_path, "*.txt")
     assert result == sorted(result)
 
 
-def test_collect_files_skips_directories(tmp_path: Path) -> None:
+async def test_collect_files_skips_directories(tmp_path: Path) -> None:
     (tmp_path / "sub").mkdir()
     (tmp_path / "file.txt").write_text("f")
 
-    result = _collect_files(tmp_path, "*")
+    result = await _collect_files(tmp_path, "*")
     assert len(result) == 1
     assert result[0].name == "file.txt"
 
 
-def test_collect_files_empty_directory(tmp_path: Path) -> None:
-    assert _collect_files(tmp_path, "*.txt") == []
+async def test_collect_files_empty_directory(tmp_path: Path) -> None:
+    assert await _collect_files(tmp_path, "*.txt") == []
 
 
 def test_map_result_to_doc_handles_missing_metadata_keys() -> None:

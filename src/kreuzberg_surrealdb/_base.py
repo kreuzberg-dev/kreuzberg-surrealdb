@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from anyio import Path as AsyncPath
 from kreuzberg import ExtractionConfig, ExtractionResult, extract_bytes, extract_file
 from surrealdb import RecordID, Value
 
@@ -115,8 +116,8 @@ def _check_insert_result(result: Value, *, context: str) -> None:
     raise IngestionError(context, errors[0])
 
 
-def _collect_files(directory: str | Path, glob: str) -> list[Path]:
-    """Collect matching file paths from a directory (sync helper).
+async def _collect_files(directory: str | Path, glob: str) -> list[Path]:
+    """Collect matching file paths from a directory.
 
     Args:
         directory: Root directory to search.
@@ -126,8 +127,12 @@ def _collect_files(directory: str | Path, glob: str) -> list[Path]:
         Sorted list of matching file paths.
 
     """
-    root = Path(directory).resolve()
-    return sorted(p for p in root.glob(glob) if p.is_file() and p.resolve().is_relative_to(root))
+    root = await AsyncPath(directory).resolve()
+    results: list[Path] = []
+    async for p in root.glob(glob):
+        if await p.is_file() and (await p.resolve()).is_relative_to(root):
+            results.append(Path(p))  # noqa: PERF401
+    return sorted(results)
 
 
 class BaseIngester(ABC):
@@ -231,7 +236,7 @@ class BaseIngester(ABC):
             glob: Glob pattern for file matching. Defaults to all files recursively.
 
         """
-        await self.ingest_files(_collect_files(directory, glob))
+        await self.ingest_files(await _collect_files(directory, glob))
 
     async def ingest_bytes(self, *, data: bytes, mime_type: str, source: str) -> None:
         """Extract and ingest from raw bytes.

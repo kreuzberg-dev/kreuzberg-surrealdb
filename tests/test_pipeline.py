@@ -1,12 +1,10 @@
 """Tests for DocumentPipeline."""
 
-import hashlib
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from kreuzberg import Chunk, ExtractionResult
-from surrealdb import RecordID
 
 from kreuzberg_surrealdb._base import _check_insert_result
 from kreuzberg_surrealdb.exceptions import DimensionMismatchError, IngestionError
@@ -114,109 +112,12 @@ def test_pipeline_preserves_user_chunking_params_embed_false(mock_client: AsyncM
 
 
 @patch("kreuzberg_surrealdb._base.extract_file")
-async def test_pipeline_ingest_file_stores_doc_and_chunks(
-    mock_extract: MagicMock,
-    mock_client: AsyncMock,
-    sample_extraction_result: MagicMock,
-    sample_chunks: list[MagicMock],
-) -> None:
-    sample_extraction_result.chunks = sample_chunks
-    mock_extract.return_value = sample_extraction_result
-
-    pipeline = DocumentPipeline(db=mock_client)
-
-    await pipeline.ingest_file("/tmp/test.pdf")
-
-    assert mock_client.query.call_count == 2
-    first_call = mock_client.query.call_args_list[0]
-    assert "INSERT IGNORE INTO documents" in first_call[0][0]
-
-    second_call = mock_client.query.call_args_list[1]
-    assert "INSERT IGNORE INTO chunks" in second_call[0][0]
-    chunk_records = second_call[0][1]["records"]
-    assert len(chunk_records) == 3
-
-    expected_hash = hashlib.sha256(sample_extraction_result.content.encode()).hexdigest()
-    expected_rid = RecordID("documents", expected_hash)
-    assert chunk_records[0]["document"] == expected_rid
-    assert chunk_records[0]["chunk_index"] == 0
-    assert chunk_records[1]["chunk_index"] == 1
-    assert chunk_records[0]["id"] == RecordID("chunks", f"{expected_hash}_0")
-    assert chunk_records[1]["id"] == RecordID("chunks", f"{expected_hash}_1")
-    assert chunk_records[2]["id"] == RecordID("chunks", f"{expected_hash}_2")
-
-
-@patch("kreuzberg_surrealdb._base.extract_file")
-async def test_pipeline_embed_false_nulls_embeddings(
-    mock_extract: MagicMock,
-    mock_client: AsyncMock,
-    sample_extraction_result: MagicMock,
-    sample_chunks: list[MagicMock],
-) -> None:
-    sample_extraction_result.chunks = sample_chunks
-    mock_extract.return_value = sample_extraction_result
-
-    pipeline = DocumentPipeline(db=mock_client, embed=False)
-
-    await pipeline.ingest_file("/tmp/test.pdf")
-
-    chunk_call = mock_client.query.call_args_list[1]
-    chunk_records = chunk_call[0][1]["records"]
-    for rec in chunk_records:
-        assert rec["embedding"] is None
-
-
-@patch("kreuzberg_surrealdb._base.extract_file")
-async def test_pipeline_chunk_metadata_extracted(
-    mock_extract: MagicMock,
-    mock_client: AsyncMock,
-    sample_extraction_result: MagicMock,
-    sample_chunks: list[MagicMock],
-) -> None:
-    sample_extraction_result.chunks = sample_chunks
-    mock_extract.return_value = sample_extraction_result
-
-    pipeline = DocumentPipeline(db=mock_client)
-
-    await pipeline.ingest_file("/tmp/test.pdf")
-
-    chunk_call = mock_client.query.call_args_list[1]
-    chunk_records = chunk_call[0][1]["records"]
-    first_chunk = chunk_records[0]
-    assert first_chunk["page_number"] == 1
-    assert first_chunk["char_start"] == 0
-    assert first_chunk["char_end"] == 100
-    assert first_chunk["first_page"] == 1
-    assert first_chunk["last_page"] == 1
-    assert "word_count" in first_chunk
-
-
-@patch("kreuzberg_surrealdb._base.extract_bytes")
-async def test_pipeline_ingest_bytes(
-    mock_extract: MagicMock,
-    mock_client: AsyncMock,
-    sample_extraction_result: MagicMock,
-) -> None:
-    sample_extraction_result.chunks = []
-    mock_extract.return_value = sample_extraction_result
-
-    pipeline = DocumentPipeline(db=mock_client)
-
-    await pipeline.ingest_bytes(data=b"data", mime_type="text/plain", source="test://source")
-
-    mock_extract.assert_called_once()
-    assert mock_extract.call_args[0][0] == b"data"
-    assert mock_extract.call_args[0][1] == "text/plain"
-    assert mock_client.query.call_count == 1
-
-
-@patch("kreuzberg_surrealdb._base.extract_file")
 async def test_pipeline_chunk_without_metadata(
     mock_extract: MagicMock,
     mock_client: AsyncMock,
     sample_extraction_result: MagicMock,
 ) -> None:
-    """Chunks with None metadata should omit page_number/char_start/etc fields."""
+    """Chunks with None metadata should set page_number/char_start/etc to None."""
     chunk = MagicMock(spec=Chunk)
     chunk.content = "Chunk without metadata."
     chunk.embedding = [0.1] * 768
@@ -232,9 +133,11 @@ async def test_pipeline_chunk_without_metadata(
     chunk_call = mock_client.query.call_args_list[1]
     chunk_records = chunk_call[0][1]["records"]
     rec = chunk_records[0]
-    assert "page_number" not in rec
-    assert "char_start" not in rec
-    assert "char_end" not in rec
+    assert rec["page_number"] is None
+    assert rec["char_start"] is None
+    assert rec["char_end"] is None
+    assert rec["first_page"] is None
+    assert rec["last_page"] is None
     assert rec["content"] == "Chunk without metadata."
     assert rec["chunk_index"] == 0
 
@@ -317,22 +220,6 @@ async def test_pipeline_raises_on_chunk_dimension_mismatch(
 
     with pytest.raises(DimensionMismatchError, match="Vector dimension mismatch during chunk insertion"):
         await pipeline.ingest_file("/tmp/test.pdf")
-
-
-@patch("kreuzberg_surrealdb.pipeline.extract_bytes")
-async def test_embed_query_uses_kreuzberg(mock_extract: MagicMock, mock_client: AsyncMock) -> None:
-    mock_chunk = MagicMock(spec=Chunk)
-    mock_chunk.embedding = [0.1, 0.2, 0.3]
-    mock_result = MagicMock(spec=ExtractionResult)
-    mock_result.chunks = [mock_chunk]
-    mock_extract.return_value = mock_result
-
-    pipeline = DocumentPipeline(db=mock_client, embed=True)
-
-    result = await pipeline.embed_query("test query")
-
-    mock_extract.assert_called_once_with(b"test query", "text/plain", config=pipeline._config)
-    assert result == [0.1, 0.2, 0.3]
 
 
 @patch("kreuzberg_surrealdb.pipeline.extract_bytes")

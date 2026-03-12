@@ -49,6 +49,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
+  "anyio>=4",
   "kreuzberg>=4.4.4",
   "surrealdb>=1.0.8",
   "typing-extensions>=4; python_version<'3.11'",
