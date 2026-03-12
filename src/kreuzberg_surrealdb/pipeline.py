@@ -62,7 +62,8 @@ class DocumentPipeline(BaseIngester):
                 missing for a custom model type.
 
         """
-        super().__init__(db=db, table=table, insert_batch_size=insert_batch_size, config=config)
+        super().__init__(db=db, table=table, config=config)
+        self._insert_batch_size = insert_batch_size
         self._chunk_table = chunk_table
         self._embed = embed
 
@@ -120,6 +121,7 @@ class DocumentPipeline(BaseIngester):
         if self._config is not None:
             self._config.chunking = chunking
             return self._config
+
         return ExtractionConfig(chunking=chunking)
 
     async def setup_schema(
@@ -157,6 +159,7 @@ class DocumentPipeline(BaseIngester):
         )
         for stmt in stmts:
             await self._client.query(stmt)
+        self._schema_ready = True
 
     async def _ingest_result(self, result: ExtractionResult, source: str) -> None:
         """Extract, store document, then store chunks with record links.

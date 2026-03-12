@@ -16,6 +16,7 @@ import pytest
 from surrealdb import AsyncSurreal
 
 from kreuzberg_surrealdb import AsyncSurrealQueryable, DocumentConnector, DocumentPipeline
+from kreuzberg_surrealdb.exceptions import SchemaNotInitializedError
 from tests.conftest import FIXTURES_DIR
 
 pytestmark = pytest.mark.integration
@@ -202,7 +203,7 @@ async def test_connector_ingest_without_schema_raises(server_db: AsyncSurrealQue
     """Ingesting into a table without calling setup_schema first should fail."""
     connector = DocumentConnector(db=server_db)
 
-    with pytest.raises(Exception, match=r".+"):
+    with pytest.raises(SchemaNotInitializedError):
         await connector.ingest_file(sample_text_file)
 
 

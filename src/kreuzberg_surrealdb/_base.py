@@ -11,7 +11,7 @@ from anyio import Path as AsyncPath
 from kreuzberg import ExtractionConfig, ExtractionResult, extract_bytes, extract_file
 from surrealdb import RecordID, Value
 
-from kreuzberg_surrealdb.exceptions import DimensionMismatchError, IngestionError
+from kreuzberg_surrealdb.exceptions import DimensionMismatchError, IngestionError, SchemaNotInitializedError
 from kreuzberg_surrealdb.types import DocumentRecord
 
 
@@ -148,7 +148,6 @@ class BaseIngester(ABC):
         *,
         db: AsyncSurrealQueryable,
         table: str = "documents",
-        insert_batch_size: int = 100,
         config: ExtractionConfig | None = None,
     ) -> None:
         """Initialize the ingester.
@@ -156,14 +155,13 @@ class BaseIngester(ABC):
         Args:
             db: An active SurrealDB async connection.
             table: Name of the documents table.
-            insert_batch_size: Max records per INSERT IGNORE batch.
             config: Optional Kreuzberg ExtractionConfig for extraction tuning.
 
         """
         self._client = db
         self._table = table
-        self._insert_batch_size = insert_batch_size
         self._config = config
+        self._schema_ready = False
 
     @property
     def client(self) -> AsyncSurrealQueryable:
@@ -175,27 +173,10 @@ class BaseIngester(ABC):
         """The documents table name."""
         return self._table
 
-    async def _insert_documents(self, records: list[DocumentRecord]) -> list[Value]:
-        """Insert documents with dedup via INSERT IGNORE.
-
-        Args:
-            records: Document dicts to insert, each keyed by a deterministic RecordID.
-
-        Returns:
-            Raw INSERT IGNORE results from SurrealDB, one entry per batch.
-
-        """
-        results: list[Value] = []
-        table = self._table
-        for i in range(0, len(records), self._insert_batch_size):
-            batch = records[i : i + self._insert_batch_size]
-            res = await self._client.query(
-                f"INSERT IGNORE INTO {table} $records",
-                {"records": batch},
-            )
-            _check_insert_result(res, context="document insertion")
-            results.append(res)
-        return results
+    def _require_schema(self) -> None:
+        """Raise if setup_schema() has not been called."""
+        if not self._schema_ready:
+            raise SchemaNotInitializedError
 
     @abstractmethod
     async def _ingest_result(self, result: ExtractionResult, source: str) -> None:
@@ -214,6 +195,7 @@ class BaseIngester(ABC):
             path: Path to the file to extract and store.
 
         """
+        self._require_schema()
         result = await extract_file(str(path), config=self._config)
         await self._ingest_result(result, str(path))
 
@@ -224,6 +206,7 @@ class BaseIngester(ABC):
             paths: Sequence of file paths to extract and store.
 
         """
+        self._require_schema()
         for path in paths:
             result = await extract_file(str(path), config=self._config)
             await self._ingest_result(result, str(path))
@@ -247,5 +230,6 @@ class BaseIngester(ABC):
             source: Identifier for the document origin.
 
         """
+        self._require_schema()
         result = await extract_bytes(data, mime_type, config=self._config)
         await self._ingest_result(result, source)

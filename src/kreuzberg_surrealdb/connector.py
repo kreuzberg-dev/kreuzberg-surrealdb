@@ -2,7 +2,7 @@
 
 from kreuzberg import ExtractionResult
 
-from kreuzberg_surrealdb._base import BaseIngester, _map_result_to_doc
+from kreuzberg_surrealdb._base import BaseIngester, _check_insert_result, _map_result_to_doc
 from kreuzberg_surrealdb.schema import build_connector_schema
 
 
@@ -39,6 +39,7 @@ class DocumentConnector(BaseIngester):
         )
         for stmt in stmts:
             await self._client.query(stmt)
+        self._schema_ready = True
 
     async def _ingest_result(self, result: ExtractionResult, source: str) -> None:
         """Process a single extraction result.
@@ -49,4 +50,8 @@ class DocumentConnector(BaseIngester):
 
         """
         doc = _map_result_to_doc(result, source, self._table)
-        await self._insert_documents([doc])
+        res = await self._client.query(
+            f"INSERT IGNORE INTO {self._table} $records",
+            {"records": [doc]},
+        )
+        _check_insert_result(res, context="document insertion")

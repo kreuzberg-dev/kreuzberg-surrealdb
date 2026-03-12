@@ -7,7 +7,7 @@ import pytest
 from kreuzberg import Chunk, ExtractionResult
 
 from kreuzberg_surrealdb._base import _check_insert_result
-from kreuzberg_surrealdb.exceptions import DimensionMismatchError, IngestionError
+from kreuzberg_surrealdb.exceptions import DimensionMismatchError, IngestionError, SchemaNotInitializedError
 from kreuzberg_surrealdb.pipeline import DocumentPipeline
 
 
@@ -127,6 +127,7 @@ async def test_pipeline_chunk_without_metadata(
     mock_extract.return_value = sample_extraction_result
 
     pipeline = DocumentPipeline(db=mock_client)
+    pipeline._schema_ready = True
 
     await pipeline.ingest_file("/tmp/test.pdf")
 
@@ -152,6 +153,7 @@ async def test_pipeline_ingest_file_no_chunks_skips_chunk_insert(
     mock_extract.return_value = sample_extraction_result
 
     pipeline = DocumentPipeline(db=mock_client)
+    pipeline._schema_ready = True
 
     await pipeline.ingest_file("/tmp/test.pdf")
 
@@ -171,6 +173,7 @@ async def test_pipeline_chunk_batch_splitting(
     mock_extract.return_value = sample_extraction_result
 
     pipeline = DocumentPipeline(db=mock_client, insert_batch_size=2)
+    pipeline._schema_ready = True
 
     await pipeline.ingest_file("/tmp/test.pdf")
 
@@ -217,6 +220,7 @@ async def test_pipeline_raises_on_chunk_dimension_mismatch(
     )
 
     pipeline = DocumentPipeline(db=mock_client)
+    pipeline._schema_ready = True
 
     with pytest.raises(DimensionMismatchError, match="Vector dimension mismatch during chunk insertion"):
         await pipeline.ingest_file("/tmp/test.pdf")
@@ -274,3 +278,25 @@ async def test_fast_preset_embed_query_produces_384_dim(mock_client: AsyncMock) 
     assert len(result.chunks) > 0
     assert result.chunks[0].embedding is not None
     assert len(result.chunks[0].embedding) == 384
+
+
+@pytest.mark.parametrize(
+    "method,args,kwargs",
+    [
+        ("ingest_file", ["/tmp/test.pdf"], {}),
+        ("ingest_files", [["/tmp/a.pdf", "/tmp/b.pdf"]], {}),
+        ("ingest_directory", ["/tmp"], {}),
+        ("ingest_bytes", [], {"data": b"hello", "mime_type": "text/plain", "source": "test"}),
+    ],
+    ids=["ingest_file", "ingest_files", "ingest_directory", "ingest_bytes"],
+)
+async def test_pipeline_raises_without_schema(
+    mock_client: AsyncMock,
+    method: str,
+    args: list,
+    kwargs: dict,
+) -> None:
+    pipeline = DocumentPipeline(db=mock_client, embed=False)
+
+    with pytest.raises(SchemaNotInitializedError, match="setup_schema"):
+        await getattr(pipeline, method)(*args, **kwargs)

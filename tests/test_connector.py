@@ -7,7 +7,7 @@ import pytest
 from kreuzberg import ExtractionConfig
 
 from kreuzberg_surrealdb.connector import DocumentConnector
-from kreuzberg_surrealdb.exceptions import IngestionError
+from kreuzberg_surrealdb.exceptions import IngestionError, SchemaNotInitializedError
 
 
 def test_analyzer_name(mock_client: AsyncMock) -> None:
@@ -34,6 +34,7 @@ async def test_ingest_file(
     mock_extract.return_value = sample_extraction_result
 
     connector = DocumentConnector(db=mock_client)
+    connector._schema_ready = True
 
     await connector.ingest_file("/tmp/test.pdf")
 
@@ -56,6 +57,7 @@ async def test_ingest_file_passes_custom_config(
     user_config = ExtractionConfig()
 
     connector = DocumentConnector(db=mock_client, config=user_config)
+    connector._schema_ready = True
 
     await connector.ingest_file("/tmp/test.pdf")
 
@@ -71,6 +73,7 @@ async def test_ingest_bytes(
     mock_extract.return_value = sample_extraction_result
 
     connector = DocumentConnector(db=mock_client)
+    connector._schema_ready = True
 
     await connector.ingest_bytes(data=b"hello world", mime_type="text/plain", source="api://response")
 
@@ -88,6 +91,7 @@ async def test_content_hash_computed(
     mock_extract.return_value = sample_extraction_result
 
     connector = DocumentConnector(db=mock_client)
+    connector._schema_ready = True
 
     await connector.ingest_file("/tmp/test.txt")
 
@@ -105,6 +109,7 @@ async def test_metadata_fields_mapped(
     mock_extract.return_value = sample_extraction_result
 
     connector = DocumentConnector(db=mock_client)
+    connector._schema_ready = True
 
     await connector.ingest_file("/tmp/test.txt")
 
@@ -127,6 +132,29 @@ async def test_connector_raises_on_silent_insert_error(
     mock_client.query = AsyncMock(return_value=["Some unexpected database error"])
 
     connector = DocumentConnector(db=mock_client)
+    connector._schema_ready = True
 
     with pytest.raises(IngestionError, match="INSERT IGNORE failed silently"):
         await connector.ingest_file("/tmp/test.pdf")
+
+
+@pytest.mark.parametrize(
+    "method,args,kwargs",
+    [
+        ("ingest_file", ["/tmp/test.pdf"], {}),
+        ("ingest_files", [["/tmp/a.pdf", "/tmp/b.pdf"]], {}),
+        ("ingest_directory", ["/tmp"], {}),
+        ("ingest_bytes", [], {"data": b"hello", "mime_type": "text/plain", "source": "test"}),
+    ],
+    ids=["ingest_file", "ingest_files", "ingest_directory", "ingest_bytes"],
+)
+async def test_connector_raises_without_schema(
+    mock_client: AsyncMock,
+    method: str,
+    args: list,
+    kwargs: dict,
+) -> None:
+    connector = DocumentConnector(db=mock_client)
+
+    with pytest.raises(SchemaNotInitializedError, match="setup_schema"):
+        await getattr(connector, method)(*args, **kwargs)
