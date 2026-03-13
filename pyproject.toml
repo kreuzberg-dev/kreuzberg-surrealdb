@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "kreuzberg-surrealdb"
-version = "0.1.0"
+version = "0.1.1"
 description = """\
   Kreuzberg-to-SurrealDB connector for document ingestion pipelines — schema management, content deduplication, \
   chunk storage, and index configuration\
@@ -50,7 +50,7 @@ classifiers = [
 ]
 dependencies = [
   "anyio>=4",
-  "kreuzberg>=4.4.4",
+  "kreuzberg>=4.4.6",
   "surrealdb>=1.0.8",
   "typing-extensions>=4; python_version<'3.11'",
 ]
